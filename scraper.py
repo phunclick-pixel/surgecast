@@ -213,17 +213,19 @@ def _attendance_line(score, venue_name):
 
 def send_alert_email(events, city):
     date_str = datetime.date.today().strftime("%B %d, %Y")
-    lines = [
+
+    # Each item is either a string (becomes a line + <br>) or None (becomes <hr>)
+    parts = [
         f"Surgecast Alert — {city}",
         date_str,
-        "=" * 44,
+        None,
         f"{len(events)} high-impact event(s) in the next 7 days:",
     ]
 
     for e in events:
         score = e["impact_score"]
         event_date = datetime.datetime.strptime(e["start_date"], "%Y-%m-%d").strftime("%B %d, %Y")
-        lines += [
+        parts += [
             "",
             e["title"],
             f"{e['venue_name']}  |  {event_date}",
@@ -231,18 +233,25 @@ def send_alert_email(events, city):
             f"Impact: {_impact_bar(score)}  {score}/100  ({_impact_label(score)})",
         ]
 
-    lines += [
-        "",
-        "=" * 44,
-        "Reply to this email to manage your subscription.",
-    ]
+    parts += ["", None, "Reply to this email to manage your subscription."]
+
+    html_parts = []
+    for part in parts:
+        if part is None:
+            html_parts.append("<hr>")
+        elif part == "":
+            html_parts.append("<br>")
+        else:
+            html_parts.append(f"{part}<br>")
+
+    html_body = "<html><body style='font-family:monospace;'>\n" + "\n".join(html_parts) + "\n</body></html>"
 
     resend.api_key = os.environ["RESEND_API_KEY"]
     resend.Emails.send({
         "from": ALERT_FROM,
         "to": [ALERT_TO],
         "subject": f"Surgecast {city}: {len(events)} High-Impact Event(s) This Week",
-        "text": "\n".join(lines),
+        "html": html_body,
     })
     print(f"Alert sent to {ALERT_TO}")
 
