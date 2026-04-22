@@ -150,7 +150,7 @@ def print_summary():
     print("=" * 55 + "\n")
 
 
-ALERT_TO = "joshmhubbard@gmail.com"
+ALERT_TO = "phunclick@gmail.com"
 ALERT_FROM = "Surgecast <onboarding@resend.dev>"
 
 def send_alert_email(events):
