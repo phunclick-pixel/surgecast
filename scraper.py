@@ -83,22 +83,38 @@ def save_event(event):
 
 
 # ---------------------------------------------------------------------------
+# Plan limits
+# ---------------------------------------------------------------------------
+
+PLAN_LIMITS = {
+    "starter": {"max_cities": 1,  "alerts_per_day": 1},
+    "growth":  {"max_cities": 3,  "alerts_per_day": 1},
+    "pro":     {"max_cities": 10, "alerts_per_day": 2},
+}
+
+
+# ---------------------------------------------------------------------------
 # Subscribers
 # ---------------------------------------------------------------------------
 
-def get_subscribers():
-    """Return all active subscribers from the DB."""
+def get_subscribers(pro_only=False):
+    """Return active subscribers with their cities from subscriber_cities."""
     headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-    resp = requests.get(
-        f"{SUPABASE_URL}/rest/v1/subscribers",
-        headers=headers,
-        params={"select": "email,city,state,alert_threshold", "active": "eq.true", "limit": "500"},
-    )
+    params = {
+        "select": "id,email,plan,subscriber_cities(id,city,state,alert_threshold)",
+        "active": "eq.true",
+        "limit": "500",
+    }
+    if pro_only:
+        params["plan"] = "eq.pro"
+
+    resp = requests.get(f"{SUPABASE_URL}/rest/v1/subscribers", headers=headers, params=params)
     rows = resp.json()
     if not isinstance(rows, list):
         print(f"subscribers table error ({resp.status_code}): {rows}")
         return []
-    return rows
+    # Only return subscribers who have at least one city configured
+    return [s for s in rows if s.get("subscriber_cities")]
 
 
 # ---------------------------------------------------------------------------
@@ -599,20 +615,26 @@ def check_and_alert(city, subscriber):
 # Main job
 # ---------------------------------------------------------------------------
 
-def run_job():
+def run_job(afternoon=False):
+    label = "afternoon (Pro)" if afternoon else "morning"
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    print(f"[{now}] Starting scheduled scrape...\n")
+    print(f"[{now}] Starting {label} scrape...\n")
 
-    subscribers = get_subscribers()
+    subscribers = get_subscribers(pro_only=afternoon)
     if not subscribers:
-        print("No active subscribers — nothing to do.")
+        print(f"No {'Pro ' if afternoon else ''}active subscribers — nothing to do.")
         return
 
-    # Group by city so we scrape each city once even if multiple subs share it
+    # Build city → [subscriber alert dicts] from subscriber_cities rows
     cities = {}
     for sub in subscribers:
-        key = (sub["city"], sub["state"])
-        cities.setdefault(key, []).append(sub)
+        for city_row in sub.get("subscriber_cities", []):
+            key = (city_row["city"], city_row["state"])
+            cities.setdefault(key, []).append({
+                "email": sub["email"],
+                "plan": sub.get("plan", "starter"),
+                "alert_threshold": city_row.get("alert_threshold") or 70,
+            })
 
     print(f"{len(subscribers)} subscriber(s) across {len(cities)} city/cities\n")
 
@@ -621,33 +643,36 @@ def run_job():
         print(f"  {city}, {state}  ({len(city_subs)} subscriber(s))")
         print(f"{'='*55}\n")
 
-        scrape_ticketmaster(city, state)
+        # Only scrape fresh data on the morning run; afternoon is alerts-only
+        if not afternoon:
+            scrape_ticketmaster(city, state)
 
-        existing_keys = get_existing_keys(city)
-        print(f"Loaded {len(existing_keys)} existing key(s) for cross-source dedup\n")
+            existing_keys = get_existing_keys(city)
+            print(f"Loaded {len(existing_keys)} existing key(s) for cross-source dedup\n")
 
-        lat, lon = geocode_city(city, state)
-        if lat and lon:
-            scrape_predicthq(city, existing_keys, lat, lon)
-        else:
-            print(f"PredictHQ: could not geocode {city}, {state} — skipping\n")
+            lat, lon = geocode_city(city, state)
+            if lat and lon:
+                scrape_predicthq(city, existing_keys, lat, lon)
+            else:
+                print(f"PredictHQ: could not geocode {city}, {state} — skipping\n")
 
-        if city.lower() == "asheville" and state.upper() == "NC":
-            scrape_city_permits(existing_keys)
+            if city.lower() == "asheville" and state.upper() == "NC":
+                scrape_city_permits(existing_keys)
 
-        remove_duplicates(city)
-        print_summary(city)
+            remove_duplicates(city)
+            print_summary(city)
 
-        print(f"Sending alerts for {city}...")
+        print(f"Sending {'afternoon ' if afternoon else ''}alerts for {city}...")
         for sub in city_subs:
             check_and_alert(city, sub)
 
 
 if __name__ == "__main__":
-    schedule.every().day.at("08:00").do(run_job)
-    print("Scheduler active - runs daily at 08:00. Press Ctrl+C to stop.")
-    print("Running initial scrape now...\n")
-    run_job()
+    schedule.every().day.at("08:00").do(lambda: run_job(afternoon=False))
+    schedule.every().day.at("16:00").do(lambda: run_job(afternoon=True))
+    print("Scheduler active - morning scrape 08:00, Pro afternoon alerts 16:00.")
+    print("Running initial morning scrape now...\n")
+    run_job(afternoon=False)
     while True:
         schedule.run_pending()
         time.sleep(60)

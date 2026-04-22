@@ -11,25 +11,22 @@
       background: #07070f; color: #e2e2f0; min-height: 100vh; padding: 2rem;
     }
     .topbar {
-      display: flex; align-items: center; justify-content: space-between;
-      margin-bottom: 2.5rem;
+      display: flex; align-items: center; justify-content: space-between; margin-bottom: 2.5rem;
     }
     .logo { font-size: 1.3rem; font-weight: 800; color: #fff; }
     .logo span { color: #6366f1; }
     .logout { font-size: 0.85rem; color: #6666a0; text-decoration: none; }
     .logout:hover { color: #e2e2f0; }
 
-    /* Stats row */
     .stats { display: flex; gap: 1rem; margin-bottom: 2rem; flex-wrap: wrap; }
     .stat {
       background: #0f0f24; border: 1px solid #1e1e3a; border-radius: 12px;
-      padding: 1.25rem 1.5rem; min-width: 140px;
+      padding: 1.25rem 1.5rem; min-width: 130px;
     }
     .stat-value { font-size: 2rem; font-weight: 800; color: #fff; line-height: 1; }
     .stat-label { font-size: 0.78rem; color: #6666a0; margin-top: 0.3rem;
                   text-transform: uppercase; letter-spacing: 0.05em; }
 
-    /* Cities */
     .cities {
       background: #0f0f24; border: 1px solid #1e1e3a; border-radius: 12px;
       padding: 1.25rem 1.5rem; margin-bottom: 2rem;
@@ -43,65 +40,43 @@
     }
     .city-tag strong { color: #6366f1; }
 
-    /* Table */
     .table-wrap { background: #0f0f24; border: 1px solid #1e1e3a; border-radius: 12px; overflow: hidden; }
-    .table-header {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 1rem 1.5rem; border-bottom: 1px solid #1e1e3a;
-    }
+    .table-header { display: flex; align-items: center; justify-content: space-between;
+                    padding: 1rem 1.5rem; border-bottom: 1px solid #1e1e3a; }
     .table-header h3 { font-size: 0.9rem; font-weight: 600; color: #fff; }
 
     table { width: 100%; border-collapse: collapse; }
-    th {
-      text-align: left; font-size: 0.72rem; font-weight: 600; color: #6666a0;
-      text-transform: uppercase; letter-spacing: 0.05em;
-      padding: 0.75rem 1.5rem; border-bottom: 1px solid #1a1a30;
-    }
+    th { text-align: left; font-size: 0.72rem; font-weight: 600; color: #6666a0;
+         text-transform: uppercase; letter-spacing: 0.05em;
+         padding: 0.75rem 1.5rem; border-bottom: 1px solid #1a1a30; }
     td { padding: 0.9rem 1.5rem; border-bottom: 1px solid #111128; vertical-align: middle; }
     tr:last-child td { border-bottom: none; }
     tr:hover td { background: rgba(99,102,241,0.03); }
 
     .email { font-size: 0.9rem; color: #e2e2f0; }
-    .location { font-size: 0.82rem; color: #8888a8; }
+    .city-list { font-size: 0.82rem; color: #8888a8; line-height: 1.6; }
     .date { font-size: 0.8rem; color: #6666a0; }
 
-    /* Active toggle */
-    .toggle {
-      display: inline-flex; align-items: center; gap: 0.5rem;
-      cursor: pointer; user-select: none;
-    }
-    .toggle-track {
-      width: 36px; height: 20px; border-radius: 10px; background: #2a2a4a;
-      position: relative; transition: background 0.2s; flex-shrink: 0;
-    }
-    .toggle-track.on { background: #6366f1; }
-    .toggle-thumb {
-      position: absolute; top: 3px; left: 3px;
-      width: 14px; height: 14px; border-radius: 50%; background: #fff;
-      transition: transform 0.2s;
-    }
-    .toggle-track.on .toggle-thumb { transform: translateX(16px); }
-    .toggle-label { font-size: 0.8rem; color: #6666a0; min-width: 50px; }
-
-    /* Threshold input */
-    .threshold-wrap { display: flex; align-items: center; gap: 0.4rem; }
-    .threshold-input {
-      width: 56px; padding: 0.3rem 0.5rem; background: #07070f;
+    /* Plan selector */
+    .plan-select {
+      padding: 0.35rem 0.6rem; background: #07070f;
       border: 1px solid rgba(100,100,200,0.2); border-radius: 6px;
-      color: #e2e2f0; font-size: 0.88rem; text-align: center; outline: none;
+      color: #e2e2f0; font-size: 0.82rem; cursor: pointer; outline: none;
     }
-    .threshold-input:focus { border-color: #6366f1; }
-    .save-btn {
-      padding: 0.3rem 0.6rem; background: #12122a; border: 1px solid #2a2a4a;
-      border-radius: 6px; color: #8888a8; font-size: 0.78rem; cursor: pointer;
-    }
-    .save-btn:hover { border-color: #6366f1; color: #6366f1; }
+    .plan-select:focus { border-color: #6366f1; }
 
-    /* Delete */
-    .delete-btn {
-      padding: 0.3rem 0.6rem; background: transparent; border: 1px solid #2a2a2a;
-      border-radius: 6px; color: #555570; font-size: 0.78rem; cursor: pointer;
-    }
+    /* Toggle */
+    .toggle { display: inline-flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none; }
+    .toggle-track { width: 36px; height: 20px; border-radius: 10px; background: #2a2a4a;
+                    position: relative; transition: background 0.2s; flex-shrink: 0; }
+    .toggle-track.on { background: #6366f1; }
+    .toggle-thumb { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px;
+                    border-radius: 50%; background: #fff; transition: transform 0.2s; }
+    .toggle-track.on .toggle-thumb { transform: translateX(16px); }
+    .toggle-label { font-size: 0.8rem; color: #6666a0; min-width: 46px; }
+
+    .delete-btn { padding: 0.3rem 0.6rem; background: transparent; border: 1px solid #2a2a2a;
+                  border-radius: 6px; color: #555570; font-size: 0.78rem; cursor: pointer; }
     .delete-btn:hover { border-color: #ef4444; color: #f87171; }
 
     .flash { font-size: 0.72rem; color: #4ade80; margin-left: 0.4rem; display: none; }
@@ -114,7 +89,6 @@
   <a href="/admin/logout" class="logout">Sign out</a>
 </div>
 
-<!-- Stats -->
 <div class="stats">
   <div class="stat">
     <div class="stat-value">{{ subscribers|length }}</div>
@@ -128,12 +102,17 @@
     <div class="stat-value">{{ cities|length }}</div>
     <div class="stat-label">Cities</div>
   </div>
+  {% for key, info in plan_info.items() %}
+  <div class="stat">
+    <div class="stat-value">{{ subscribers|selectattr('plan', 'equalto', key)|list|length }}</div>
+    <div class="stat-label">{{ info.label }}</div>
+  </div>
+  {% endfor %}
 </div>
 
-<!-- City breakdown -->
 {% if cities %}
 <div class="cities">
-  <h3>Cities</h3>
+  <h3>Cities covered</h3>
   <div class="city-tags">
     {% for city, count in cities.items() %}
       <div class="city-tag">{{ city }} <strong>{{ count }}</strong></div>
@@ -142,17 +121,14 @@
 </div>
 {% endif %}
 
-<!-- Subscribers table -->
 <div class="table-wrap">
-  <div class="table-header">
-    <h3>Subscribers</h3>
-  </div>
+  <div class="table-header"><h3>Subscribers</h3></div>
   <table>
     <thead>
       <tr>
         <th>Email</th>
-        <th>Location</th>
-        <th>Threshold</th>
+        <th>Cities</th>
+        <th>Plan</th>
         <th>Active</th>
         <th>Signed up</th>
         <th></th>
@@ -162,17 +138,23 @@
       {% for s in subscribers %}
       <tr id="row-{{ s.id }}">
         <td class="email">{{ s.email }}</td>
-        <td class="location">{{ s.city }}, {{ s.state }}</td>
-        <td>
-          <div class="threshold-wrap">
-            <input class="threshold-input" type="number" min="0" max="100"
-                   value="{{ s.alert_threshold }}" id="t-{{ s.id }}">
-            <button class="save-btn" onclick="saveThreshold('{{ s.id }}')">Save</button>
-            <span class="flash" id="flash-{{ s.id }}">✓</span>
-          </div>
+        <td class="city-list">
+          {% for c in s.get('subscriber_cities', []) %}
+            {{ c.city }}, {{ c.state }}<br>
+          {% else %}—{% endfor %}
         </td>
         <td>
-          <div class="toggle" onclick="toggleActive('{{ s.id }}', this)">
+          <select class="plan-select" onchange="setPlan('{{ s.id }}', this.value)">
+            {% for key, info in plan_info.items() %}
+            <option value="{{ key }}" {{ 'selected' if s.get('plan','starter') == key else '' }}>
+              {{ info.label }}
+            </option>
+            {% endfor %}
+          </select>
+          <span class="flash" id="flash-{{ s.id }}">✓</span>
+        </td>
+        <td>
+          <div class="toggle" onclick="toggleActive('{{ s.id }}')">
             <div class="toggle-track {{ 'on' if s.active else '' }}" id="track-{{ s.id }}">
               <div class="toggle-thumb"></div>
             </div>
@@ -192,7 +174,7 @@
 </div>
 
 <script>
-  async function toggleActive(id, el) {
+  async function toggleActive(id) {
     const track = document.getElementById('track-' + id);
     const label = document.getElementById('label-' + id);
     const res = await fetch('/admin/toggle/' + id, { method: 'POST' });
@@ -201,13 +183,12 @@
     label.textContent = data.active ? 'Active' : 'Paused';
   }
 
-  async function saveThreshold(id) {
-    const val = document.getElementById('t-' + id).value;
+  async function setPlan(id, plan) {
     const flash = document.getElementById('flash-' + id);
-    await fetch('/admin/threshold/' + id, {
+    await fetch('/admin/set-plan/' + id, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ threshold: parseInt(val) }),
+      body: JSON.stringify({ plan }),
     });
     flash.style.display = 'inline';
     setTimeout(() => flash.style.display = 'none', 1500);
@@ -219,6 +200,5 @@
     document.getElementById('row-' + id).remove();
   }
 </script>
-
 </body>
 </html>

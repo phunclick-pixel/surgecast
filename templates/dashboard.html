@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Surgecast — My Dashboard</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: #07070f; color: #e2e2f0; min-height: 100vh; padding: 2rem;
+    }
+    a { color: inherit; text-decoration: none; }
+
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 2.5rem; flex-wrap: wrap; gap: 1rem;
+    }
+    .logo { font-size: 1.3rem; font-weight: 800; color: #fff; }
+    .logo span { color: #6366f1; }
+    .topbar-right { display: flex; align-items: center; gap: 1.5rem; }
+    .email-badge { font-size: 0.82rem; color: #6666a0; }
+    .logout { font-size: 0.82rem; color: #6666a0; }
+    .logout:hover { color: #e2e2f0; }
+
+    /* Plan badge */
+    .plan-banner {
+      background: #0f0f24; border: 1px solid #1e1e3a; border-radius: 12px;
+      padding: 1.25rem 1.5rem; margin-bottom: 1.5rem;
+      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;
+    }
+    .plan-name { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: #6666a0; }
+    .plan-title { font-size: 1.2rem; font-weight: 700; color: #fff; margin-top: 0.2rem; }
+    .plan-detail { font-size: 0.85rem; color: #8888a8; margin-top: 0.2rem; }
+    .upgrade-btn {
+      padding: 0.6rem 1.25rem; background: #6366f1; color: #fff; font-weight: 600;
+      border-radius: 8px; font-size: 0.85rem; border: none; cursor: pointer;
+    }
+    .upgrade-btn:hover { background: #4f46e5; }
+
+    /* Section title */
+    .section-title {
+      font-size: 0.75rem; font-weight: 600; color: #6666a0;
+      text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.75rem;
+    }
+
+    /* Cities */
+    .cities-grid { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 2rem; }
+    .city-card {
+      background: #0f0f24; border: 1px solid #1e1e3a; border-radius: 10px;
+      padding: 1rem 1.25rem; display: flex; align-items: center; justify-content: space-between;
+    }
+    .city-name { font-size: 0.95rem; font-weight: 600; color: #fff; }
+    .city-meta { font-size: 0.8rem; color: #6666a0; margin-top: 0.15rem; }
+    .remove-btn {
+      padding: 0.35rem 0.75rem; background: transparent; border: 1px solid #2a2a3a;
+      border-radius: 6px; color: #555570; font-size: 0.78rem; cursor: pointer;
+    }
+    .remove-btn:hover { border-color: #ef4444; color: #f87171; }
+
+    /* Add city form */
+    .add-city-card {
+      background: #0f0f24; border: 1px dashed #2a2a4a; border-radius: 10px;
+      padding: 1.25rem; margin-bottom: 2rem;
+    }
+    .add-city-card h3 { font-size: 0.9rem; font-weight: 600; color: #fff; margin-bottom: 0.75rem; }
+    .add-row { display: grid; grid-template-columns: 1fr 90px auto; gap: 0.6rem; align-items: end; }
+    label { display: block; font-size: 0.72rem; font-weight: 600; color: #6666a0;
+            text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.3rem; }
+    input, select {
+      width: 100%; padding: 0.7rem 0.9rem; background: #07070f;
+      border: 1px solid rgba(100,100,200,0.2); border-radius: 8px;
+      color: #e2e2f0; font-size: 0.9rem; outline: none;
+    }
+    input:focus, select:focus { border-color: #6366f1; }
+    select { appearance: none; cursor: pointer; }
+    .add-btn {
+      padding: 0.7rem 1rem; background: #6366f1; color: #fff; font-weight: 600;
+      border: none; border-radius: 8px; cursor: pointer; font-size: 0.88rem;
+      white-space: nowrap;
+    }
+    .add-btn:hover { background: #4f46e5; }
+    .add-btn:disabled { background: #2a2a50; cursor: default; }
+    .limit-note { font-size: 0.8rem; color: #6666a0; margin-top: 0.75rem; }
+    .add-error { font-size: 0.82rem; color: #f87171; margin-top: 0.5rem; display: none; }
+
+    /* Events */
+    .events-list { display: flex; flex-direction: column; gap: 0.6rem; }
+    .event-card {
+      background: #0f0f24; border: 1px solid #1e1e3a; border-radius: 10px;
+      padding: 0.9rem 1.25rem; display: flex; align-items: center; gap: 1rem;
+    }
+    .score-badge {
+      width: 42px; height: 42px; border-radius: 8px; background: #12122a;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.85rem; font-weight: 700; color: #6366f1; flex-shrink: 0;
+    }
+    .score-badge.high { color: #f59e0b; }
+    .event-title { font-size: 0.9rem; font-weight: 600; color: #fff; }
+    .event-meta { font-size: 0.78rem; color: #6666a0; margin-top: 0.2rem; }
+    .event-city { font-size: 0.72rem; color: #4444660; background: #12122a;
+                  border: 1px solid #2a2a4a; border-radius: 4px;
+                  padding: 0.15rem 0.5rem; color: #8888a8; margin-left: auto; flex-shrink: 0; }
+    .no-events { color: #444466; font-size: 0.88rem; padding: 1rem 0; }
+  </style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">Surge<span>cast</span></div>
+  <div class="topbar-right">
+    <span class="email-badge">{{ sub.email }}</span>
+    <a href="/dashboard/logout" class="logout">Sign out</a>
+  </div>
+</div>
+
+<!-- Plan banner -->
+<div class="plan-banner">
+  <div>
+    <div class="plan-name">Current plan</div>
+    <div class="plan-title">{{ limits.label }} — {{ limits.price }}</div>
+    <div class="plan-detail">
+      Up to {{ limits.max_cities }} {{ 'city' if limits.max_cities == 1 else 'cities' }} ·
+      {{ '2× daily alerts' if plan == 'pro' else 'Daily morning alert' }}
+    </div>
+  </div>
+  {% if plan != 'pro' %}
+  <button class="upgrade-btn" onclick="alert('Upgrade coming soon — email us at hello@surgecast.com')">
+    Upgrade plan →
+  </button>
+  {% endif %}
+</div>
+
+<!-- Cities -->
+<div class="section-title">Your cities ({{ cities|length }} / {{ limits.max_cities }})</div>
+<div class="cities-grid" id="cities-list">
+  {% for c in cities %}
+  <div class="city-card" id="city-{{ c.id }}">
+    <div>
+      <div class="city-name">{{ c.city }}, {{ c.state }}</div>
+      <div class="city-meta">Alert threshold: {{ c.alert_threshold }}</div>
+    </div>
+    <button class="remove-btn" onclick="removeCity('{{ c.id }}', '{{ c.city }}')">Remove</button>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- Add city -->
+{% if cities|length < limits.max_cities %}
+<div class="add-city-card">
+  <h3>Add a city</h3>
+  <div class="add-row">
+    <div>
+      <label for="new-city">City</label>
+      <input type="text" id="new-city" placeholder="Charlotte">
+    </div>
+    <div>
+      <label for="new-state">State</label>
+      <select id="new-state">
+        <option value="">—</option>
+        <option>AL</option><option>AK</option><option>AZ</option><option>AR</option>
+        <option>CA</option><option>CO</option><option>CT</option><option>DE</option>
+        <option>FL</option><option>GA</option><option>HI</option><option>ID</option>
+        <option>IL</option><option>IN</option><option>IA</option><option>KS</option>
+        <option>KY</option><option>LA</option><option>ME</option><option>MD</option>
+        <option>MA</option><option>MI</option><option>MN</option><option>MS</option>
+        <option>MO</option><option>MT</option><option>NE</option><option>NV</option>
+        <option>NH</option><option>NJ</option><option>NM</option><option>NY</option>
+        <option>NC</option><option>ND</option><option>OH</option><option>OK</option>
+        <option>OR</option><option>PA</option><option>RI</option><option>SC</option>
+        <option>SD</option><option>TN</option><option>TX</option><option>UT</option>
+        <option>VT</option><option>VA</option><option>WA</option><option>WV</option>
+        <option>WI</option><option>WY</option>
+      </select>
+    </div>
+    <button class="add-btn" id="add-btn" onclick="addCity()">Add →</button>
+  </div>
+  <div class="add-error" id="add-error"></div>
+</div>
+{% else %}
+<div class="add-city-card">
+  <h3>City limit reached</h3>
+  <p class="limit-note">
+    Your {{ limits.label }} plan supports {{ limits.max_cities }}
+    {{ 'city' if limits.max_cities == 1 else 'cities' }}.
+    Upgrade to add more.
+  </p>
+</div>
+{% endif %}
+
+<!-- Upcoming events -->
+<div class="section-title">Upcoming high-impact events</div>
+<div class="events-list">
+  {% if events %}
+    {% for e in events %}
+    <div class="event-card">
+      <div class="score-badge {{ 'high' if e.impact_score >= 80 else '' }}">
+        {{ e.impact_score }}
+      </div>
+      <div>
+        <div class="event-title">{{ e.title }}</div>
+        <div class="event-meta">{{ e.start_date }} · {{ e.venue_name or 'Unknown venue' }}</div>
+      </div>
+      <div class="event-city">{{ e.city }}</div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="no-events">No high-impact events found for your cities right now. Check back tomorrow.</p>
+  {% endif %}
+</div>
+
+<script>
+  async function addCity() {
+    const city  = document.getElementById('new-city').value.trim();
+    const state = document.getElementById('new-state').value;
+    const err   = document.getElementById('add-error');
+    const btn   = document.getElementById('add-btn');
+
+    err.style.display = 'none';
+    if (!city || !state) { err.textContent = 'Enter a city and state.'; err.style.display = 'block'; return; }
+
+    btn.disabled = true; btn.textContent = 'Adding…';
+
+    const res  = await fetch('/dashboard/add-city', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ city, state }),
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      location.reload();
+    } else {
+      err.textContent = data.error || 'Something went wrong.';
+      err.style.display = 'block';
+      btn.disabled = false; btn.textContent = 'Add →';
+    }
+  }
+
+  async function removeCity(id, name) {
+    if (!confirm('Remove ' + name + '?')) return;
+    await fetch('/dashboard/remove-city/' + id, { method: 'POST' });
+    document.getElementById('city-' + id).remove();
+  }
+</script>
+
+</body>
+</html>
