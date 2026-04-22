@@ -153,30 +153,34 @@ def print_summary():
 ALERT_TO = "phunclick@gmail.com"
 ALERT_FROM = "Surgecast <onboarding@resend.dev>"
 
-def send_alert_email(events):
+def send_alert_email(events, city):
     date_str = datetime.date.today().strftime("%B %d, %Y")
     lines = [
         f"Surgecast Alert - {date_str}",
         "=" * 40,
-        f"{len(events)} high-impact event(s) in Asheville in the next 7 days:\n",
+        f"{len(events)} high-impact event(s) in {city} in the next 7 days:",
     ]
     for e in events:
+        lines.append("")
         lines.append(f"[{e['impact_score']}] {e['start_date']}  {e['title']}")
         lines.append(f"      @ {e['venue_name']}")
-        lines.append("")
-    lines += ["--", "Surgecast - Asheville event intelligence"]
+    lines += [
+        "",
+        "--",
+        "Reply to this email to manage your subscription.",
+    ]
 
     resend.api_key = os.environ["RESEND_API_KEY"]
     resend.Emails.send({
         "from": ALERT_FROM,
         "to": [ALERT_TO],
-        "subject": f"Surgecast: {len(events)} High-Impact Event(s) This Week",
+        "subject": f"Surgecast {city}: {len(events)} Upcoming High-Impact Event(s) This Week",
         "text": "\n".join(lines),
     })
     print(f"Alert sent to {ALERT_TO}")
 
 
-def check_and_alert():
+def check_and_alert(city):
     today = datetime.date.today().isoformat()
     in_7_days = (datetime.date.today() + datetime.timedelta(days=7)).isoformat()
 
@@ -185,6 +189,7 @@ def check_and_alert():
         headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
         params=[
             ("select", "title,venue_name,start_date,impact_score"),
+            ("city", f"eq.{city}"),
             ("start_date", f"gte.{today}"),
             ("start_date", f"lte.{in_7_days}"),
             ("impact_score", "gt.70"),
@@ -194,7 +199,7 @@ def check_and_alert():
 
     if events:
         print(f"Found {len(events)} high-score event(s) in the next 7 days - sending alert...")
-        send_alert_email(events)
+        send_alert_email(events, city)
     else:
         print("No events scoring above 70 in the next 7 days - no alert sent")
 
@@ -204,7 +209,7 @@ def run_job():
     print(f"[{now}] Starting scheduled scrape...")
     scrape_ticketmaster("Asheville", "NC")
     print_summary()
-    check_and_alert()
+    check_and_alert("Asheville")
 
 
 if __name__ == "__main__":
