@@ -109,6 +109,37 @@ def scrape_ticketmaster(city, state):
     print(f"\nDone - {saved} new events saved")
 
 
+def remove_duplicates():
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    rows = requests.get(
+        f"{SUPABASE_URL}/rest/v1/events",
+        headers=headers,
+        params={"select": "id,title,start_date", "order": "id.asc", "limit": "1000"},
+    ).json()
+
+    seen = {}
+    to_delete = []
+    for r in rows:
+        key = (r["title"], r["start_date"])
+        if key in seen:
+            to_delete.append(r["id"])
+        else:
+            seen[key] = r["id"]
+
+    if not to_delete:
+        print("No duplicates found")
+        return
+
+    del_headers = {**headers, "Prefer": "return=representation"}
+    for rid in to_delete:
+        requests.delete(
+            f"{SUPABASE_URL}/rest/v1/events",
+            headers=del_headers,
+            params={"id": f"eq.{rid}"},
+        )
+    print(f"Removed {len(to_delete)} duplicate(s)")
+
+
 def print_summary():
     today = datetime.date.today().isoformat()
     base_headers = {
@@ -153,20 +184,56 @@ def print_summary():
 ALERT_TO = "phunclick@gmail.com"
 ALERT_FROM = "Surgecast <onboarding@resend.dev>"
 
+
+def _impact_bar(score):
+    filled = int(score / 10)
+    return "█" * filled + "░" * (10 - filled)
+
+
+def _impact_label(score):
+    if score >= 80:
+        return "High impact — prepare now"
+    elif score >= 50:
+        return "Medium impact — worth monitoring"
+    else:
+        return "Low impact — heads up only"
+
+
+def _attendance_line(score, venue_name):
+    if score > 80:
+        estimate = "5,000+"
+    elif score > 60:
+        estimate = "2,000+"
+    elif score > 40:
+        estimate = "500+"
+    else:
+        estimate = "a small local crowd"
+    return f"Expected to draw {estimate} attendees to the {venue_name} area"
+
+
 def send_alert_email(events, city):
     date_str = datetime.date.today().strftime("%B %d, %Y")
     lines = [
-        f"Surgecast Alert - {date_str}",
-        "=" * 40,
-        f"{len(events)} high-impact event(s) in {city} in the next 7 days:",
+        f"Surgecast Alert — {city}",
+        date_str,
+        "=" * 44,
+        f"{len(events)} high-impact event(s) in the next 7 days:",
     ]
+
     for e in events:
-        lines.append("")
-        lines.append(f"[{e['impact_score']}] {e['start_date']}  {e['title']}")
-        lines.append(f"      @ {e['venue_name']}")
+        score = e["impact_score"]
+        event_date = datetime.datetime.strptime(e["start_date"], "%Y-%m-%d").strftime("%B %d, %Y")
+        lines += [
+            "",
+            e["title"],
+            f"{e['venue_name']}  |  {event_date}",
+            _attendance_line(score, e["venue_name"]),
+            f"Impact: {_impact_bar(score)}  {score}/100  ({_impact_label(score)})",
+        ]
+
     lines += [
         "",
-        "--",
+        "=" * 44,
         "Reply to this email to manage your subscription.",
     ]
 
@@ -174,7 +241,7 @@ def send_alert_email(events, city):
     resend.Emails.send({
         "from": ALERT_FROM,
         "to": [ALERT_TO],
-        "subject": f"Surgecast {city}: {len(events)} Upcoming High-Impact Event(s) This Week",
+        "subject": f"Surgecast {city}: {len(events)} High-Impact Event(s) This Week",
         "text": "\n".join(lines),
     })
     print(f"Alert sent to {ALERT_TO}")
@@ -208,6 +275,7 @@ def run_job():
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     print(f"[{now}] Starting scheduled scrape...")
     scrape_ticketmaster("Asheville", "NC")
+    remove_duplicates()
     print_summary()
     check_and_alert("Asheville")
 
