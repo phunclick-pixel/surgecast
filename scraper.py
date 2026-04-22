@@ -1,20 +1,27 @@
 import datetime
+import hashlib
 import os
+import re
 import time
 
 import resend
 import requests
 import schedule
+from dotenv import load_dotenv
+
+load_dotenv()
 
 TICKETMASTER_KEY = os.environ["TICKETMASTER_KEY"]
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
+PREDICTHQ_KEY = os.environ["PREDICTHQ_KEY"]
 
 VENUE_SCORE_OVERRIDES = {
     "asheville yards": 85,
     "mccormick field": 70,
     "the orange peel": 55,
 }
+
 
 def calculate_score(title, category, venue_name):
     venue_lower = (venue_name or "").lower()
@@ -33,6 +40,14 @@ def calculate_score(title, category, venue_name):
         score += 25
     elif any(x in category_lower for x in ["miscellaneous", "family"]):
         score += 15
+    elif "city_permit" in category_lower:
+        score += 10
+        if any(x in title_lower for x in ["festival", "parade", "marathon", "race", "5k", "10k", "half marathon"]):
+            score += 15
+        if any(x in title_lower for x in ["concert", "music", "performance", "show"]):
+            score += 10
+        if any(x in title_lower for x in ["market", "fair", "carnival", "block party"]):
+            score += 8
 
     # Venue size scoring
     if any(x in venue_lower for x in ["stadium", "arena", "coliseum"]):
@@ -54,16 +69,94 @@ def calculate_score(title, category, venue_name):
 
     return min(score, 100)
 
+
 def save_event(event):
     url = f"{SUPABASE_URL}/rest/v1/events"
     headers = {
         "apikey": SUPABASE_KEY,
         "Authorization": f"Bearer {SUPABASE_KEY}",
         "Content-Type": "application/json",
-        "Prefer": "resolution=ignore-duplicates"
+        "Prefer": "resolution=ignore-duplicates",
     }
     response = requests.post(url, headers=headers, json=event)
     return response.status_code
+
+
+# ---------------------------------------------------------------------------
+# Subscribers
+# ---------------------------------------------------------------------------
+
+def get_subscribers():
+    """Return all active subscribers from the DB."""
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    resp = requests.get(
+        f"{SUPABASE_URL}/rest/v1/subscribers",
+        headers=headers,
+        params={"select": "email,city,state,alert_threshold", "active": "eq.true", "limit": "500"},
+    )
+    rows = resp.json()
+    if not isinstance(rows, list):
+        print(f"subscribers table error ({resp.status_code}): {rows}")
+        return []
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# Geocoding (used by PredictHQ to build the radius search)
+# ---------------------------------------------------------------------------
+
+_geocode_cache = {}
+
+
+def geocode_city(city, state):
+    """Return (lat, lon) for a city via OpenStreetMap Nominatim. Cached per run."""
+    key = (city.lower(), state.upper())
+    if key in _geocode_cache:
+        return _geocode_cache[key]
+    try:
+        resp = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={"q": f"{city}, {state}, US", "format": "json", "limit": 1},
+            headers={"User-Agent": "Surgecast/1.0"},
+            timeout=10,
+        )
+        results = resp.json()
+        if results:
+            lat, lon = float(results[0]["lat"]), float(results[0]["lon"])
+            _geocode_cache[key] = (lat, lon)
+            return lat, lon
+    except Exception as e:
+        print(f"Geocode error for {city}, {state}: {e}")
+    _geocode_cache[key] = (None, None)
+    return None, None
+
+
+# ---------------------------------------------------------------------------
+# Deduplication helpers
+# ---------------------------------------------------------------------------
+
+def get_existing_keys(city):
+    """Return a set of (title_lower, start_date) for every event in the DB for this city."""
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
+    rows = requests.get(
+        f"{SUPABASE_URL}/rest/v1/events",
+        headers=headers,
+        params={"select": "title,start_date", "city": f"eq.{city}", "limit": "2000"},
+    ).json()
+    return {
+        (r["title"].lower().strip(), r["start_date"])
+        for r in rows
+        if r.get("title") and r.get("start_date")
+    }
+
+
+def is_duplicate(title, start_date, existing_keys):
+    return (title.lower().strip(), start_date) in existing_keys
+
+
+# ---------------------------------------------------------------------------
+# Ticketmaster
+# ---------------------------------------------------------------------------
 
 def scrape_ticketmaster(city, state):
     url = "https://app.ticketmaster.com/discovery/v2/events.json"
@@ -73,12 +166,12 @@ def scrape_ticketmaster(city, state):
         "stateCode": state,
         "countryCode": "US",
         "size": 20,
-        "sort": "date,asc"
+        "sort": "date,asc",
     }
     response = requests.get(url, params=params)
     data = response.json()
     events = data.get("_embedded", {}).get("events", [])
-    print(f"Found {len(events)} events in {city}\n")
+    print(f"Found {len(events)} Ticketmaster events in {city}")
 
     saved = 0
     for e in events:
@@ -96,25 +189,241 @@ def scrape_ticketmaster(city, state):
             "city": city,
             "start_date": e["dates"]["start"].get("localDate"),
             "category": category,
-            "impact_score": score
+            "impact_score": score,
         }
 
         status = save_event(event)
         if status in [200, 201]:
             saved += 1
-            print(f"[{score:3d}] {title}")
+            print(f"  [{score:3d}] {title}")
         else:
-            print(f"[skip] {title}")
+            print(f"  [skip] {title}")
 
-    print(f"\nDone - {saved} new events saved")
+    print(f"Ticketmaster: {saved} new event(s) added\n")
 
 
-def remove_duplicates():
+# ---------------------------------------------------------------------------
+# PredictHQ
+# NOTE: run this SQL once in Supabase before using this source:
+#   ALTER TABLE events ADD COLUMN IF NOT EXISTS phq_attendance integer;
+# ---------------------------------------------------------------------------
+
+def scrape_predicthq(city, existing_keys, lat, lon):
+    """Pulls upcoming events within 30 miles of (lat, lon) from PredictHQ."""
+    url = "https://api.predicthq.com/v1/events/"
+    headers = {
+        "Authorization": f"Bearer {PREDICTHQ_KEY}",
+        "Accept": "application/json",
+    }
+    params = {
+        "within": f"30mi@{lat},{lon}",
+        "active.gte": datetime.date.today().isoformat(),
+        "limit": 200,
+    }
+
+    print("── PredictHQ ──────────────────────────────────────────")
+    try:
+        resp = requests.get(url, headers=headers, params=params, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception as e:
+        print(f"PredictHQ error: {e}")
+        return 0
+
+    results = data.get("results", [])
+    print(f"Found {len(results)} events near {city} (30-mile radius)")
+
+    saved = 0
+    for e in results:
+        title = (e.get("title") or "").strip()
+        start_date = (e.get("start") or "")[:10]
+        if not title or not start_date:
+            continue
+
+        if is_duplicate(title, start_date, existing_keys):
+            continue
+
+        venue_name = None
+        for entity in e.get("entities", []):
+            if entity.get("type") == "venue":
+                venue_name = entity.get("name")
+                break
+
+        category = e.get("category", "")
+        phq_attendance = e.get("phq_attendance")
+        score = calculate_score(title, category, venue_name)
+
+        event = {
+            "source": "predicthq",
+            "external_id": e.get("id"),
+            "title": title,
+            "venue_name": venue_name,
+            "city": city,
+            "start_date": start_date,
+            "category": category,
+            "impact_score": score,
+            "phq_attendance": phq_attendance,
+        }
+
+        status = save_event(event)
+        if status in [200, 201]:
+            saved += 1
+            existing_keys.add((title.lower().strip(), start_date))
+            att_str = f"{phq_attendance:,}" if phq_attendance else "N/A"
+            print(f"  [{score:3d}] {title[:50]:<50}  att: {att_str}")
+
+    print(f"PredictHQ: {saved} new event(s) added\n")
+    return saved
+
+
+# ---------------------------------------------------------------------------
+# Asheville City Permits  (SimpliCity GraphQL API — Asheville-only)
+# ---------------------------------------------------------------------------
+
+_DATE_PATTERNS = [
+    (r"\b([A-Za-z]+ \d{1,2},? \d{4})\b", "%B %d, %Y"),  # April 15, 2026
+    (r"\b(\d{1,2}/\d{1,2}/\d{4})\b",      "%m/%d/%Y"),   # 04/15/2026
+    (r"\b(\d{4}-\d{2}-\d{2})\b",          "%Y-%m-%d"),   # 2026-04-15
+]
+
+_PERMITS_QUERY = """
+query getPermitsQuery {
+  permits(
+    date_field: "applied_date",
+    after: "%s",
+    before: "%s"
+  ) {
+    permit_number
+    permit_type
+    permit_description
+    application_name
+    address
+    applied_date
+    status_date
+  }
+}
+"""
+
+
+def _parse_permit_date(text):
+    """Return the first future date found in text as 'YYYY-MM-DD', or None."""
+    today = datetime.date.today()
+    text_clean = re.sub(r"(\d)(st|nd|rd|th)\b", r"\1", text)
+    for pattern, fmt in _DATE_PATTERNS:
+        for m in re.finditer(pattern, text_clean, re.IGNORECASE):
+            raw = m.group(1).strip().rstrip(",")
+            try:
+                d = datetime.datetime.strptime(raw, fmt).date()
+                if d >= today:
+                    return d.isoformat()
+            except ValueError:
+                continue
+    return None
+
+
+def scrape_city_permits(existing_keys):
+    """Pulls Event-Temporary Use permits from Asheville's SimpliCity GraphQL API."""
+    print("── Asheville City Permits ─────────────────────────────")
+
+    today = datetime.date.today()
+    after  = (today - datetime.timedelta(days=180)).isoformat()
+    before = (today + datetime.timedelta(days=30)).isoformat()
+
+    try:
+        resp = requests.post(
+            "https://data-api1.ashevillenc.gov/graphql",
+            headers={
+                "Content-Type": "application/json",
+                "x-apollo-operation-name": "getPermitsQuery",
+            },
+            json={
+                "operationName": "getPermitsQuery",
+                "query": _PERMITS_QUERY % (after, before),
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+        permits = resp.json().get("data", {}).get("permits", [])
+    except Exception as e:
+        print(f"City permits API error: {e}")
+        return 0
+
+    event_permits = [
+        p for p in permits
+        if "event" in (p.get("permit_type") or "").lower()
+        or "temporary use" in (p.get("permit_type") or "").lower()
+    ]
+    print(f"Found {len(event_permits)} event permit(s) from SimpliCity")
+
+    saved = 0
+    seen_in_run = set()
+
+    for p in event_permits:
+        title = (p.get("permit_description") or p.get("application_name") or "").strip()
+        if not title:
+            title = f"Event Permit {p.get('permit_number', '')}".strip()
+        title = title[:80]
+
+        start_date = _parse_permit_date(title)
+
+        if not start_date:
+            for field in ("status_date", "applied_date"):
+                raw = (p.get(field) or "")[:10]
+                if raw:
+                    try:
+                        d = datetime.date.fromisoformat(raw)
+                        if d >= today:
+                            start_date = d.isoformat()
+                            break
+                    except ValueError:
+                        continue
+
+        if not start_date:
+            continue
+
+        venue_name = (p.get("address") or "City of Asheville").strip()
+
+        dedup_key = (title.lower().strip(), start_date)
+        if dedup_key in seen_in_run or is_duplicate(title, start_date, existing_keys):
+            continue
+        seen_in_run.add(dedup_key)
+
+        ext_id = hashlib.md5(
+            f"citypermit:{p.get('permit_number', title)}:{start_date}".encode()
+        ).hexdigest()[:16]
+        score = calculate_score(title, "city_permit", venue_name)
+
+        event = {
+            "source": "city_permits",
+            "external_id": ext_id,
+            "title": title,
+            "venue_name": venue_name,
+            "city": "Asheville",
+            "start_date": start_date,
+            "category": "city_permit",
+            "impact_score": score,
+        }
+
+        status = save_event(event)
+        if status in [200, 201]:
+            saved += 1
+            existing_keys.add(dedup_key)
+            print(f"  [{score:3d}] {title}")
+
+    print(f"City permits: {saved} new event(s) added\n")
+    return saved
+
+
+# ---------------------------------------------------------------------------
+# Dedup + summary
+# ---------------------------------------------------------------------------
+
+def remove_duplicates(city):
     headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
     rows = requests.get(
         f"{SUPABASE_URL}/rest/v1/events",
         headers=headers,
-        params={"select": "id,title,start_date", "order": "id.asc", "limit": "1000"},
+        params={"select": "id,title,start_date", "city": f"eq.{city}", "order": "id.asc", "limit": "1000"},
     ).json()
 
     seen = {}
@@ -140,17 +449,14 @@ def remove_duplicates():
     print(f"Removed {len(to_delete)} duplicate(s)")
 
 
-def print_summary():
+def print_summary(city):
     today = datetime.date.today().isoformat()
-    base_headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-    }
+    base_headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
 
     all_events = requests.get(
         f"{SUPABASE_URL}/rest/v1/events",
         headers=base_headers,
-        params={"select": "impact_score", "limit": "1000"},
+        params={"select": "impact_score", "city": f"eq.{city}", "limit": "1000"},
     ).json()
 
     total = len(all_events)
@@ -162,6 +468,7 @@ def print_summary():
         headers=base_headers,
         params={
             "select": "title,venue_name,start_date,impact_score",
+            "city": f"eq.{city}",
             "start_date": f"gte.{today}",
             "impact_score": "gt.50",
             "order": "start_date.asc",
@@ -170,7 +477,7 @@ def print_summary():
     ).json()
 
     print("\n" + "=" * 55)
-    print("  POST-SCRAPE SUMMARY")
+    print(f"  SUMMARY — {city}")
     print("=" * 55)
     print(f"  Total events in database : {total}")
     print(f"  Scoring above 70         : {above_70}")
@@ -181,7 +488,10 @@ def print_summary():
     print("=" * 55 + "\n")
 
 
-ALERT_TO = "phunclick@gmail.com"
+# ---------------------------------------------------------------------------
+# Alerts
+# ---------------------------------------------------------------------------
+
 ALERT_FROM = "Surgecast <onboarding@resend.dev>"
 
 
@@ -211,10 +521,9 @@ def _attendance_line(score, venue_name):
     return f"Expected to draw {estimate} attendees to the {venue_name} area"
 
 
-def send_alert_email(events, city):
+def send_alert_email(events, city, to_email):
     date_str = datetime.date.today().strftime("%B %d, %Y")
 
-    # Each item is either a string (becomes a line + <br>) or None (becomes <hr>)
     parts = [
         f"Surgecast Alert — {city}",
         date_str,
@@ -244,21 +553,27 @@ def send_alert_email(events, city):
         else:
             html_parts.append(f"{part}<br>")
 
-    html_body = "<html><body style='font-family:monospace;'>\n" + "\n".join(html_parts) + "\n</body></html>"
+    html_body = (
+        "<html><body style='font-family:monospace;'>\n"
+        + "\n".join(html_parts)
+        + "\n</body></html>"
+    )
 
     resend.api_key = os.environ["RESEND_API_KEY"]
     resend.Emails.send({
         "from": ALERT_FROM,
-        "to": [ALERT_TO],
+        "to": [to_email],
         "subject": f"Surgecast {city}: {len(events)} High-Impact Event(s) This Week",
         "html": html_body,
     })
-    print(f"Alert sent to {ALERT_TO}")
+    print(f"  Alert sent → {to_email}")
 
 
-def check_and_alert(city):
+def check_and_alert(city, subscriber):
     today = datetime.date.today().isoformat()
     in_7_days = (datetime.date.today() + datetime.timedelta(days=7)).isoformat()
+    threshold = subscriber.get("alert_threshold") or 70
+    to_email = subscriber["email"]
 
     events = requests.get(
         f"{SUPABASE_URL}/rest/v1/events",
@@ -268,25 +583,64 @@ def check_and_alert(city):
             ("city", f"eq.{city}"),
             ("start_date", f"gte.{today}"),
             ("start_date", f"lte.{in_7_days}"),
-            ("impact_score", "gt.70"),
+            ("impact_score", f"gt.{threshold}"),
             ("order", "start_date.asc"),
         ],
     ).json()
 
     if events:
-        print(f"Found {len(events)} high-score event(s) in the next 7 days - sending alert...")
-        send_alert_email(events, city)
+        print(f"  {len(events)} event(s) above {threshold} → sending alert to {to_email}...")
+        send_alert_email(events, city, to_email)
     else:
-        print("No events scoring above 70 in the next 7 days - no alert sent")
+        print(f"  No events above {threshold} for {to_email} — no alert sent")
 
+
+# ---------------------------------------------------------------------------
+# Main job
+# ---------------------------------------------------------------------------
 
 def run_job():
     now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    print(f"[{now}] Starting scheduled scrape...")
-    scrape_ticketmaster("Asheville", "NC")
-    remove_duplicates()
-    print_summary()
-    check_and_alert("Asheville")
+    print(f"[{now}] Starting scheduled scrape...\n")
+
+    subscribers = get_subscribers()
+    if not subscribers:
+        print("No active subscribers — nothing to do.")
+        return
+
+    # Group by city so we scrape each city once even if multiple subs share it
+    cities = {}
+    for sub in subscribers:
+        key = (sub["city"], sub["state"])
+        cities.setdefault(key, []).append(sub)
+
+    print(f"{len(subscribers)} subscriber(s) across {len(cities)} city/cities\n")
+
+    for (city, state), city_subs in cities.items():
+        print(f"\n{'='*55}")
+        print(f"  {city}, {state}  ({len(city_subs)} subscriber(s))")
+        print(f"{'='*55}\n")
+
+        scrape_ticketmaster(city, state)
+
+        existing_keys = get_existing_keys(city)
+        print(f"Loaded {len(existing_keys)} existing key(s) for cross-source dedup\n")
+
+        lat, lon = geocode_city(city, state)
+        if lat and lon:
+            scrape_predicthq(city, existing_keys, lat, lon)
+        else:
+            print(f"PredictHQ: could not geocode {city}, {state} — skipping\n")
+
+        if city.lower() == "asheville" and state.upper() == "NC":
+            scrape_city_permits(existing_keys)
+
+        remove_duplicates(city)
+        print_summary(city)
+
+        print(f"Sending alerts for {city}...")
+        for sub in city_subs:
+            check_and_alert(city, sub)
 
 
 if __name__ == "__main__":

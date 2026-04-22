@@ -1,6 +1,9 @@
 requests
 psycopg2-binary
 python-dateutil
+python-dotenv
 beautifulsoup4
 schedule
 resend
+flask
+gunicorn
