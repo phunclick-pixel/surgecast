@@ -2,10 +2,9 @@ import datetime
 import os
 import time
 
+import resend
 import requests
 import schedule
-from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail
 
 TICKETMASTER_KEY = os.environ["TICKETMASTER_KEY"]
 SUPABASE_URL = os.environ["SUPABASE_URL"]
@@ -151,55 +150,30 @@ def print_summary():
     print("=" * 55 + "\n")
 
 
+ALERT_TO = "joshmhubbard@gmail.com"
+ALERT_FROM = "Surgecast <onboarding@resend.dev>"
+
 def send_alert_email(events):
-    api_key = os.environ.get("SENDGRID_API_KEY")
-    from_email = os.environ.get("ALERT_FROM_EMAIL")
-    recipients = [e.strip() for e in os.environ.get("ALERT_EMAILS", "").split(",") if e.strip()]
+    date_str = datetime.date.today().strftime("%B %d, %Y")
+    lines = [
+        f"Surgecast Alert - {date_str}",
+        "=" * 40,
+        f"{len(events)} high-impact event(s) in Asheville in the next 7 days:\n",
+    ]
+    for e in events:
+        lines.append(f"[{e['impact_score']}] {e['start_date']}  {e['title']}")
+        lines.append(f"      @ {e['venue_name']}")
+        lines.append("")
+    lines += ["--", "Surgecast - Asheville event intelligence"]
 
-    if not api_key or not from_email or not recipients:
-        print("SendGrid not configured - skipping email alert")
-        return
-
-    rows = "".join(
-        f"""<tr>
-              <td style="padding:10px;border-bottom:1px solid #eee;">{e['start_date']}</td>
-              <td style="padding:10px;border-bottom:1px solid #eee;">{e['title']}</td>
-              <td style="padding:10px;border-bottom:1px solid #eee;">{e['venue_name']}</td>
-              <td style="padding:10px;border-bottom:1px solid #eee;text-align:center;
-                         font-weight:bold;color:#2563eb;">{e['impact_score']}</td>
-            </tr>"""
-        for e in events
-    )
-
-    html = f"""
-    <html><body style="font-family:Arial,sans-serif;background:#f4f4f4;padding:20px;">
-      <div style="max-width:620px;margin:0 auto;background:#fff;border-radius:8px;padding:32px;">
-        <h2 style="margin-top:0;color:#1a1a1a;">Surgecast Weekly Alert</h2>
-        <p style="color:#555;">{len(events)} high-impact event(s) in Asheville in the next 7 days:</p>
-        <table style="width:100%;border-collapse:collapse;margin-top:16px;">
-          <thead>
-            <tr style="background:#f0f0f0;">
-              <th style="padding:10px;text-align:left;border-bottom:2px solid #ddd;">Date</th>
-              <th style="padding:10px;text-align:left;border-bottom:2px solid #ddd;">Event</th>
-              <th style="padding:10px;text-align:left;border-bottom:2px solid #ddd;">Venue</th>
-              <th style="padding:10px;text-align:center;border-bottom:2px solid #ddd;">Score</th>
-            </tr>
-          </thead>
-          <tbody>{rows}</tbody>
-        </table>
-        <p style="color:#999;font-size:12px;margin-top:24px;">Surgecast &mdash; Asheville event intelligence</p>
-      </div>
-    </body></html>
-    """
-
-    message = Mail(
-        from_email=from_email,
-        to_emails=recipients,
-        subject=f"Surgecast: {len(events)} High-Impact Event(s) Coming This Week",
-        html_content=html,
-    )
-    response = SendGridAPIClient(api_key).send(message)
-    print(f"Alert sent to {len(recipients)} subscriber(s) (HTTP {response.status_code})")
+    resend.api_key = os.environ["RESEND_API_KEY"]
+    resend.Emails.send({
+        "from": ALERT_FROM,
+        "to": [ALERT_TO],
+        "subject": f"Surgecast: {len(events)} High-Impact Event(s) This Week",
+        "text": "\n".join(lines),
+    })
+    print(f"Alert sent to {ALERT_TO}")
 
 
 def check_and_alert():
