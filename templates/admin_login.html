@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Surgecast Admin</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: #07070f;
+      color: #e2e2f0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card {
+      background: #0f0f24;
+      border: 1px solid #1e1e3a;
+      border-radius: 16px;
+      padding: 2.5rem;
+      width: 340px;
+    }
+    .logo { font-size: 1.2rem; font-weight: 800; color: #fff; margin-bottom: 1.5rem; }
+    .logo span { color: #6366f1; }
+    h2 { font-size: 1.1rem; color: #8888a8; font-weight: 500; margin-bottom: 1.5rem; }
+    label { display: block; font-size: 0.75rem; font-weight: 600; color: #6666a0;
+            text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 0.4rem; }
+    input { width: 100%; padding: 0.8rem 1rem; background: #07070f;
+            border: 1px solid rgba(100,100,200,0.2); border-radius: 8px;
+            color: #e2e2f0; font-size: 0.95rem; outline: none; margin-bottom: 1rem; }
+    input:focus { border-color: #6366f1; }
+    button { width: 100%; padding: 0.85rem; background: #6366f1; color: #fff;
+             font-weight: 700; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; }
+    button:hover { background: #4f46e5; }
+    .error { margin-top: 1rem; padding: 0.75rem 1rem; background: rgba(239,68,68,0.08);
+             border: 1px solid rgba(239,68,68,0.3); border-radius: 8px;
+             color: #f87171; font-size: 0.88rem; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">Surge<span>cast</span></div>
+    <h2>Admin access</h2>
+    <form method="POST">
+      <label for="password">Password</label>
+      <input type="password" id="password" name="password" autofocus required>
+      <button type="submit">Sign in →</button>
+      {% if error %}<div class="error">{{ error }}</div>{% endif %}
+    </form>
+  </div>
+</body>
+</html>
