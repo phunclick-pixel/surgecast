@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Surgecast — Unsubscribed</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: #07070f; color: #e2e2f0; min-height: 100vh;
+      display: flex; align-items: center; justify-content: center; padding: 2rem;
+    }
+    .card {
+      background: #0f0f24; border: 1px solid #1e1e3a; border-radius: 20px;
+      padding: 3rem 2.5rem; max-width: 420px; width: 100%; text-align: center;
+    }
+    .icon { font-size: 2.5rem; margin-bottom: 1.25rem; }
+    h1 { font-size: 1.5rem; font-weight: 800; color: #fff; margin-bottom: 0.6rem; }
+    p  { font-size: 0.9rem; color: #8888a8; line-height: 1.6; margin-bottom: 1.5rem; }
+    a.btn {
+      display: inline-block; background: #6366f1; color: #fff; font-weight: 700;
+      padding: 0.75rem 1.75rem; border-radius: 8px; text-decoration: none;
+      font-size: 0.9rem;
+    }
+    a.btn:hover { background: #4f46e5; }
+    .error-note { font-size: 0.8rem; color: #f87171; margin-top: 1rem; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    {% if error %}
+      <div class="icon">⚠️</div>
+      <h1>Invalid link</h1>
+      <p>This unsubscribe link is invalid or has expired.</p>
+      <p>Sign in to your dashboard to manage your account, or email
+         <a href="mailto:hello@surgecast.io" style="color:#6366f1;">hello@surgecast.io</a>
+         and we'll take care of it.</p>
+      <a href="/dashboard/login" class="btn">Go to dashboard →</a>
+    {% else %}
+      <div class="icon">👋</div>
+      <h1>You're unsubscribed</h1>
+      <p>You've been removed from all Surgecast alerts. No more emails.</p>
+      <p>Changed your mind? Email
+         <a href="mailto:hello@surgecast.io" style="color:#6366f1;">hello@surgecast.io</a>
+         and we'll reactivate your account.</p>
+      <a href="/" class="btn">Back to surgecast.io</a>
+    {% endif %}
+  </div>
+</body>
+</html>

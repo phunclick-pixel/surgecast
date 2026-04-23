@@ -1,4 +1,6 @@
 import datetime
+import hmac as _hmac
+import hashlib
 import os
 import random
 import re
@@ -55,6 +57,15 @@ SB_HEADERS = {
 
 def is_valid_email(email):
     return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email))
+
+
+def unsub_token(email):
+    """Generate a tamper-proof unsubscribe token from the Flask secret."""
+    return _hmac.new(
+        app.secret_key.encode(),
+        email.strip().lower().encode(),
+        hashlib.sha256,
+    ).hexdigest()[:32]
 
 
 def get_client_ip():
@@ -524,6 +535,51 @@ def dashboard_set_threshold(city_id):
         json={"alert_threshold": value},
     )
     return jsonify({"success": True})
+
+
+@app.route("/dashboard/cancel", methods=["POST"])
+@customer_required
+def dashboard_cancel():
+    """Deactivate account from the dashboard."""
+    email = session["customer_email"]
+    sub = get_subscriber_by_email(email)
+    if sub:
+        requests.patch(
+            f"{SUPABASE_URL}/rest/v1/subscribers",
+            headers=SB_HEADERS,
+            params={"id": f"eq.{sub['id']}"},
+            json={"active": False},
+        )
+    session.clear()
+    return redirect(url_for("unsubscribe_confirmed"))
+
+
+@app.route("/unsubscribe")
+def unsubscribe():
+    """One-click unsubscribe from email link."""
+    email = (request.args.get("email") or "").strip().lower()
+    token = request.args.get("token", "")
+
+    if not email or not token:
+        return render_template("unsubscribe.html", error=True)
+
+    if not _hmac.compare_digest(unsub_token(email), token):
+        return render_template("unsubscribe.html", error=True)
+
+    # Deactivate the subscriber
+    requests.patch(
+        f"{SUPABASE_URL}/rest/v1/subscribers",
+        headers=SB_HEADERS,
+        params={"email": f"eq.{email}"},
+        json={"active": False},
+    )
+    session.clear()
+    return redirect(url_for("unsubscribe_confirmed"))
+
+
+@app.route("/unsubscribe/confirmed")
+def unsubscribe_confirmed():
+    return render_template("unsubscribe.html", error=False)
 
 
 @app.route("/dashboard/logout")

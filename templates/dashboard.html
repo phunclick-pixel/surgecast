@@ -274,6 +274,21 @@
   {% endif %}
 </div>
 
+<!-- Cancel account -->
+<div style="margin-top:3rem;padding-top:2rem;border-top:1px solid #1a1a2e;text-align:center;">
+  <p style="font-size:0.8rem;color:#444466;margin-bottom:0.75rem;">
+    Want to stop receiving alerts?
+  </p>
+  <form action="/dashboard/cancel" method="post"
+        onsubmit="return confirm('This will deactivate your account and stop all alerts. Continue?')">
+    <button type="submit"
+            style="background:transparent;border:1px solid #2a2a3a;border-radius:8px;
+                   color:#555570;font-size:0.82rem;padding:0.45rem 1.1rem;cursor:pointer;">
+      Cancel account
+    </button>
+  </form>
+</div>
+
 <script>
   async function addCity() {
     const city  = document.getElementById('new-city').value.trim();

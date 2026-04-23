@@ -1,5 +1,6 @@
 import datetime
 import hashlib
+import hmac as _hmac
 import os
 import re
 import time
@@ -694,7 +695,17 @@ def print_summary(city):
 # Alerts
 # ---------------------------------------------------------------------------
 
-ALERT_FROM = "Surgecast <alerts@surgecast.io>"
+ALERT_FROM   = "Surgecast <alerts@surgecast.io>"
+FLASK_SECRET = os.environ.get("FLASK_SECRET", "change-me-in-production")
+
+
+def _unsub_link(email):
+    token = _hmac.new(
+        FLASK_SECRET.encode(),
+        email.strip().lower().encode(),
+        hashlib.sha256,
+    ).hexdigest()[:32]
+    return f"https://surgecast.io/unsubscribe?email={email}&token={token}"
 
 
 
@@ -787,9 +798,9 @@ def send_alert_email(high_events, medium_events, city, to_email):
   <hr style="border:none;border-top:1px solid #1e1e3a;margin:24px 0;">
   <div style="font-size:11px;color:#444466;text-align:center;">
     You&rsquo;re receiving this because you signed up at surgecast.io &middot;
-    <a href="https://surgecast.io/dashboard" style="color:#6366f1;">
-      Manage subscription
-    </a>
+    <a href="https://surgecast.io/dashboard" style="color:#6366f1;">Manage subscription</a>
+    &middot;
+    <a href="{_unsub_link(to_email)}" style="color:#444466;">Unsubscribe</a>
   </div>
 </body>
 </html>"""
@@ -855,6 +866,8 @@ def send_advance_email(events, city, to_email):
     Weekly advance notice from surgecast.io &middot;
     You&rsquo;ll also get a 7-day reminder as each event approaches &middot;
     <a href="https://surgecast.io/dashboard" style="color:#6366f1;">Manage subscription</a>
+    &middot;
+    <a href="{_unsub_link(to_email)}" style="color:#444466;">Unsubscribe</a>
   </div>
 </body>
 </html>"""
