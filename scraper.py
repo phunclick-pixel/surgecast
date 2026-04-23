@@ -92,6 +92,10 @@ PLAN_LIMITS = {
     "pro":     {"max_cities": 10, "alerts_per_day": 2},
 }
 
+# Alert email thresholds (adjustable)
+ALERT_THRESHOLD_HIGH = 70   # At or above → HIGH PRIORITY section
+ALERT_THRESHOLD_LOW  = 40   # Below this  → silently skipped
+
 
 # ---------------------------------------------------------------------------
 # Subscribers
@@ -469,6 +473,150 @@ def scrape_city_permits(existing_keys):
 
 
 # ---------------------------------------------------------------------------
+# UNCW  (Wilmington, NC)
+# Sources: general events JSON feed + sports iCal
+# ---------------------------------------------------------------------------
+
+def _score_uncw_event(title, is_sports=False):
+    t = title.lower()
+    if any(x in t for x in ["graduation", "commencement"]):
+        return 90
+    if "homecoming" in t:
+        return 85
+    if any(x in t for x in ["move-in", "move in", "moving in", "move day"]):
+        return 80
+    if any(x in t for x in ["football", "basketball"]):
+        return 65
+    if is_sports:
+        return 50   # Any other sports event
+    return 35       # General campus event
+
+
+def _scrape_uncw_general(existing_keys):
+    """Pull UNCW general university events from the JSON feed."""
+    url = "https://www.uncw.edu/events/_data/current.json"
+    today = datetime.date.today().isoformat()
+    try:
+        resp = requests.get(url, timeout=15,
+                            headers={"User-Agent": "Surgecast/1.0"})
+        resp.raise_for_status()
+        raw = resp.json()
+    except Exception as e:
+        print(f"UNCW general events error: {e}")
+        return 0
+
+    items = raw if isinstance(raw, list) else raw.get("events", [])
+    saved = 0
+    for item in items:
+        title = (item.get("title") or "").strip()
+        start_raw = (item.get("startDate") or "")[:10]
+        if not title or not start_raw or start_raw < today:
+            continue
+        if is_duplicate(title, start_raw, existing_keys):
+            continue
+
+        location = ""
+        for d in (item.get("additionDetails") or []):
+            location = (d.get("text") or "").strip()
+            if location:
+                break
+
+        score  = _score_uncw_event(title, is_sports=False)
+        ext_id = hashlib.md5(f"uncw:{title}:{start_raw}".encode()).hexdigest()[:16]
+        event  = {
+            "source": "uncw",
+            "external_id": ext_id,
+            "title": title,
+            "venue_name": location or "UNCW Campus",
+            "city": "Wilmington",
+            "start_date": start_raw,
+            "category": "university",
+            "impact_score": score,
+        }
+        status = save_event(event)
+        if status in (200, 201):
+            saved += 1
+            existing_keys.add((title.lower().strip(), start_raw))
+            print(f"  [{score:3d}] {title[:60]}")
+    return saved
+
+
+def _scrape_uncw_sports(existing_keys):
+    """Pull UNCW sports events from the Sidearm iCal feed."""
+    url = "https://uncwsports.com/calendar.ics"
+    today = datetime.date.today().isoformat()
+    try:
+        resp = requests.get(url, timeout=15,
+                            headers={"User-Agent": "Surgecast/1.0"})
+        resp.raise_for_status()
+        text = resp.text
+    except Exception as e:
+        print(f"UNCW sports iCal error: {e}")
+        return 0
+
+    # Unfold continued lines (iCal spec: lines continued with leading space/tab)
+    text = re.sub(r"\r?\n[ \t]", "", text)
+    saved = 0
+
+    for block in re.split(r"BEGIN:VEVENT", text)[1:]:
+        block = block.split("END:VEVENT")[0]
+
+        def field(name):
+            m = re.search(rf"^{name}[^:\r\n]*:(.+)", block, re.MULTILINE)
+            return m.group(1).strip() if m else ""
+
+        title    = field("SUMMARY")
+        dtstart  = field("DTSTART")
+        location = field("LOCATION")
+
+        if not title:
+            continue
+
+        dm = re.search(r"(\d{8})", dtstart)
+        if not dm:
+            continue
+        ds = dm.group(1)
+        start_date = f"{ds[:4]}-{ds[4:6]}-{ds[6:8]}"
+
+        if start_date < today:
+            continue
+        if is_duplicate(title, start_date, existing_keys):
+            continue
+
+        score  = _score_uncw_event(title, is_sports=True)
+        ext_id = hashlib.md5(
+            f"uncw_sports:{title}:{start_date}".encode()
+        ).hexdigest()[:16]
+        event  = {
+            "source": "uncw",
+            "external_id": ext_id,
+            "title": title,
+            "venue_name": location or "UNCW",
+            "city": "Wilmington",
+            "start_date": start_date,
+            "category": "sports",
+            "impact_score": score,
+        }
+        status = save_event(event)
+        if status in (200, 201):
+            saved += 1
+            existing_keys.add((title.lower().strip(), start_date))
+            print(f"  [{score:3d}] {title[:60]}")
+    return saved
+
+
+def scrape_uncw(existing_keys):
+    print("-- UNCW General Events ---")
+    g = _scrape_uncw_general(existing_keys)
+    print(f"UNCW general: {g} new event(s)\n")
+
+    print("-- UNCW Sports (iCal) ---")
+    s = _scrape_uncw_sports(existing_keys)
+    print(f"UNCW sports: {s} new event(s)\n")
+    return g + s
+
+
+# ---------------------------------------------------------------------------
 # Dedup + summary
 # ---------------------------------------------------------------------------
 
@@ -549,104 +697,139 @@ def print_summary(city):
 ALERT_FROM = "Surgecast <alerts@surgecast.io>"
 
 
-def _impact_bar(score):
-    filled = int(score / 10)
-    return "█" * filled + "░" * (10 - filled)
+
+def _event_card_html(e):
+    score = e["impact_score"]
+    try:
+        fmt_date = datetime.datetime.strptime(
+            e["start_date"], "%Y-%m-%d"
+        ).strftime("%B %d, %Y")
+    except ValueError:
+        fmt_date = e["start_date"]
+    bar    = "\u2588" * int(score / 10) + "\u2591" * (10 - int(score / 10))
+    venue  = e.get("venue_name") or "Venue TBD"
+    return (
+        "<div style='background:#0f0f24;border:1px solid #1e1e3a;"
+        "border-radius:10px;padding:14px 18px;margin-bottom:10px;'>"
+        f"<div style='font-size:15px;font-weight:700;color:#fff;"
+        f"margin-bottom:4px;'>{e['title']}</div>"
+        f"<div style='font-size:13px;color:#8888a8;'>{fmt_date} &middot; {venue}</div>"
+        f"<div style='font-size:12px;color:#6366f1;margin-top:6px;"
+        f"font-family:monospace;'>{bar} {score}/100</div>"
+        "</div>"
+    )
 
 
-def _impact_label(score):
-    if score >= 80:
-        return "High impact — prepare now"
-    elif score >= 50:
-        return "Medium impact — worth monitoring"
-    else:
-        return "Low impact — heads up only"
-
-
-def _attendance_line(score, venue_name):
-    if score > 80:
-        estimate = "5,000+"
-    elif score > 60:
-        estimate = "2,000+"
-    elif score > 40:
-        estimate = "500+"
-    else:
-        estimate = "a small local crowd"
-    return f"Expected to draw {estimate} attendees to the {venue_name} area"
-
-
-def send_alert_email(events, city, to_email):
+def send_alert_email(high_events, medium_events, city, to_email):
     date_str = datetime.date.today().strftime("%B %d, %Y")
 
-    parts = [
-        f"Surgecast Alert — {city}",
-        date_str,
-        None,
-        f"{len(events)} high-impact event(s) in the next 7 days:",
-    ]
+    # Subject line
+    if high_events and medium_events:
+        subject = (f"Surgecast {city}: {len(high_events)} High-Priority + "
+                   f"{len(medium_events)} to Monitor")
+    elif high_events:
+        subject = f"Surgecast {city}: {len(high_events)} High-Priority Event(s) This Week"
+    else:
+        subject = f"Surgecast {city}: {len(medium_events)} Event(s) Worth Monitoring"
 
-    for e in events:
-        score = e["impact_score"]
-        event_date = datetime.datetime.strptime(e["start_date"], "%Y-%m-%d").strftime("%B %d, %Y")
-        parts += [
-            "",
-            e["title"],
-            f"{e['venue_name']}  |  {event_date}",
-            _attendance_line(score, e["venue_name"]),
-            f"Impact: {_impact_bar(score)}  {score}/100  ({_impact_label(score)})",
-        ]
+    # Build sections
+    sections_html = ""
 
-    parts += ["", None, "Reply to this email to manage your subscription."]
+    if high_events:
+        cards = "".join(_event_card_html(e) for e in high_events)
+        sections_html += (
+            "<div style='margin-bottom:28px;'>"
+            "<div style='color:#f59e0b;font-weight:700;font-size:11px;"
+            "text-transform:uppercase;letter-spacing:0.08em;"
+            "margin-bottom:6px;'>HIGH PRIORITY</div>"
+            "<div style='color:#e2e2f0;font-size:13px;margin-bottom:14px;"
+            "border-left:3px solid #f59e0b;padding-left:10px;'>"
+            "Action recommended before these dates</div>"
+            + cards +
+            "</div>"
+        )
 
-    html_parts = []
-    for part in parts:
-        if part is None:
-            html_parts.append("<hr>")
-        elif part == "":
-            html_parts.append("<br>")
-        else:
-            html_parts.append(f"{part}<br>")
+    if medium_events:
+        cards = "".join(_event_card_html(e) for e in medium_events)
+        sections_html += (
+            "<div style='margin-bottom:28px;'>"
+            "<div style='color:#6366f1;font-weight:700;font-size:11px;"
+            "text-transform:uppercase;letter-spacing:0.08em;"
+            "margin-bottom:6px;'>WORTH MONITORING</div>"
+            "<div style='color:#e2e2f0;font-size:13px;margin-bottom:14px;"
+            "border-left:3px solid #6366f1;padding-left:10px;'>"
+            "Worth monitoring</div>"
+            + cards +
+            "</div>"
+        )
 
-    html_body = (
-        "<html><body style='font-family:monospace;'>\n"
-        + "\n".join(html_parts)
-        + "\n</body></html>"
-    )
+    html_body = f"""
+<html>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+             background:#07070f;color:#e2e2f0;padding:32px;max-width:600px;margin:0 auto;">
+  <div style="margin-bottom:24px;">
+    <div style="font-size:20px;font-weight:800;color:#fff;">
+      Surge<span style="color:#6366f1;">cast</span>
+    </div>
+    <div style="font-size:13px;color:#6666a0;margin-top:4px;">
+      {city} Alert &mdash; {date_str}
+    </div>
+  </div>
+  {sections_html}
+  <hr style="border:none;border-top:1px solid #1e1e3a;margin:24px 0;">
+  <div style="font-size:11px;color:#444466;">
+    Reply to manage your subscription &middot;
+    <a href="https://surgecast.io/dashboard" style="color:#6366f1;">
+      View dashboard
+    </a>
+  </div>
+</body>
+</html>"""
 
     resend.api_key = os.environ["RESEND_API_KEY"]
     resend.Emails.send({
         "from": ALERT_FROM,
         "to": [to_email],
-        "subject": f"Surgecast {city}: {len(events)} High-Impact Event(s) This Week",
+        "subject": subject,
         "html": html_body,
     })
     print(f"  Alert sent → {to_email}")
 
 
 def check_and_alert(city, subscriber):
-    today = datetime.date.today().isoformat()
+    today     = datetime.date.today().isoformat()
     in_7_days = (datetime.date.today() + datetime.timedelta(days=7)).isoformat()
-    threshold = subscriber.get("alert_threshold") or 70
-    to_email = subscriber["email"]
+    # Subscriber's threshold defines the HIGH/MEDIUM split for their city
+    sub_threshold = subscriber.get("alert_threshold") or ALERT_THRESHOLD_HIGH
+    to_email  = subscriber["email"]
 
-    events = requests.get(
+    # Fetch everything above the global floor (ALERT_THRESHOLD_LOW)
+    all_events = requests.get(
         f"{SUPABASE_URL}/rest/v1/events",
         headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
         params=[
             ("select", "title,venue_name,start_date,impact_score"),
-            ("city", f"eq.{city}"),
-            ("start_date", f"gte.{today}"),
-            ("start_date", f"lte.{in_7_days}"),
-            ("impact_score", f"gt.{threshold}"),
-            ("order", "start_date.asc"),
+            ("city",        f"eq.{city}"),
+            ("start_date",  f"gte.{today}"),
+            ("start_date",  f"lte.{in_7_days}"),
+            ("impact_score", f"gte.{ALERT_THRESHOLD_LOW}"),
+            ("order",       "impact_score.desc"),
         ],
     ).json()
 
-    if events:
-        print(f"  {len(events)} event(s) above {threshold} → sending alert to {to_email}...")
-        send_alert_email(events, city, to_email)
+    if not isinstance(all_events, list):
+        all_events = []
+
+    # Split into HIGH (at or above subscriber threshold) and MEDIUM (floor → threshold-1)
+    high   = [e for e in all_events if e["impact_score"] >= sub_threshold]
+    medium = [e for e in all_events
+              if ALERT_THRESHOLD_LOW <= e["impact_score"] < sub_threshold]
+
+    if high or medium:
+        print(f"  {len(high)} HIGH + {len(medium)} MEDIUM → alert to {to_email}")
+        send_alert_email(high, medium, city, to_email)
     else:
-        print(f"  No events above {threshold} for {to_email} — no alert sent")
+        print(f"  No events above floor ({ALERT_THRESHOLD_LOW}) for {to_email} — skipped")
 
 
 # ---------------------------------------------------------------------------
@@ -698,6 +881,9 @@ def run_job(afternoon=False):
 
             if city.lower() == "asheville" and state.upper() == "NC":
                 scrape_city_permits(existing_keys)
+
+            if city.lower() == "wilmington" and state.upper() == "NC":
+                scrape_uncw(existing_keys)
 
             remove_duplicates(city)
             print_summary(city)
