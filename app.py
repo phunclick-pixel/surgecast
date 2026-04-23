@@ -1,3 +1,4 @@
+import datetime
 import os
 import random
 import re
@@ -37,6 +38,47 @@ SB_HEADERS = {
 
 def is_valid_email(email):
     return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email))
+
+
+def get_client_ip():
+    """Return the real client IP, accounting for Railway's proxy."""
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.remote_addr
+
+
+def get_trial_info(sub):
+    """Return (trial_active, days_left, trial_expired).
+
+    trial_active  — trial exists and has not ended
+    days_left     — calendar days remaining (≥1 when active)
+    trial_expired — trial ended AND subscriber is still on the free starter plan
+    """
+    trial_ends_at = sub.get("trial_ends_at")
+    plan = sub.get("plan", "starter")
+
+    if not trial_ends_at:
+        return False, 0, False
+
+    try:
+        ends_date = datetime.date.fromisoformat(trial_ends_at[:10])
+        today = datetime.date.today()
+        if ends_date >= today:
+            return True, (ends_date - today).days + 1, False
+        else:
+            # Expired — only "locked" if they never upgraded
+            return False, 0, plan == "starter"
+    except (ValueError, TypeError):
+        return False, 0, False
+
+
+def get_effective_limits(sub):
+    """Return the PLAN_LIMITS dict the subscriber actually gets right now."""
+    trial_active, _, _ = get_trial_info(sub)
+    if trial_active:
+        return PLAN_LIMITS["growth"]   # Growth features during free trial
+    return PLAN_LIMITS.get(sub.get("plan", "starter"), PLAN_LIMITS["starter"])
 
 
 def get_city_threshold(city, state):
@@ -88,7 +130,7 @@ def get_subscriber_by_email(email):
         f"{SUPABASE_URL}/rest/v1/subscribers",
         headers=SB_HEADERS,
         params={
-            "select": "id,email,plan,active,subscriber_cities(id,city,state,alert_threshold)",
+            "select": "id,email,plan,active,trial_ends_at,subscriber_cities(id,city,state,alert_threshold)",
             "email": f"eq.{email}",
             "limit": "1",
         },
@@ -140,11 +182,46 @@ def subscribe():
     threshold = get_city_threshold(city, state)
     print(f"Signup: {email} / {city}, {state} → threshold {threshold}")
 
+    # ── Abuse check: one trial per email (DB unique constraint handles this)
+    # and one trial per IP for genuinely new accounts ────────────────────────
+    existing_email = requests.get(
+        f"{SUPABASE_URL}/rest/v1/subscribers",
+        headers=SB_HEADERS,
+        params={"email": f"eq.{email}", "select": "id", "limit": "1"},
+    ).json()
+    is_new_account = not (isinstance(existing_email, list) and existing_email)
+
+    client_ip = get_client_ip()
+    if is_new_account and client_ip:
+        thirty_days_ago = (
+            datetime.datetime.utcnow() - datetime.timedelta(days=30)
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        ip_hits = requests.get(
+            f"{SUPABASE_URL}/rest/v1/subscribers",
+            headers=SB_HEADERS,
+            params={
+                "signup_ip": f"eq.{client_ip}",
+                "created_at": f"gte.{thirty_days_ago}",
+                "select": "id",
+                "limit": "1",
+            },
+        ).json()
+        if isinstance(ip_hits, list) and ip_hits:
+            return jsonify({
+                "error": "A free trial from this network is already active. "
+                         "Email hello@surgecast.io if you need help."
+            }), 429
+
+    trial_ends_at = (
+        datetime.datetime.utcnow() + datetime.timedelta(days=30)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     # Create subscriber
     resp = requests.post(
         f"{SUPABASE_URL}/rest/v1/subscribers",
         headers={**SB_HEADERS, "Prefer": "return=representation,resolution=ignore-duplicates"},
-        json={"email": email, "active": True, "plan": "starter"},
+        json={"email": email, "active": True, "plan": "starter",
+              "trial_ends_at": trial_ends_at, "signup_ip": client_ip},
     )
 
     if resp.status_code not in (200, 201):
@@ -253,10 +330,11 @@ def dashboard():
 
     plan = sub.get("plan", "starter")
     limits = PLAN_LIMITS.get(plan, PLAN_LIMITS["starter"])
+    effective_limits = get_effective_limits(sub)
+    trial_active, trial_days_left, trial_expired = get_trial_info(sub)
     cities = sub.get("subscriber_cities", [])
 
     # Fetch upcoming high-impact events for all their cities
-    import datetime
     today = datetime.date.today().isoformat()
     all_events = []
     for c in cities:
@@ -280,6 +358,10 @@ def dashboard():
 
     return render_template("dashboard.html",
                            sub=sub, plan=plan, limits=limits,
+                           effective_limits=effective_limits,
+                           trial_active=trial_active,
+                           trial_days_left=trial_days_left,
+                           trial_expired=trial_expired,
                            cities=cities, events=all_events,
                            plan_info=PLAN_LIMITS)
 
@@ -293,12 +375,20 @@ def dashboard_add_city():
         return jsonify({"error": "Account not found."}), 404
 
     plan = sub.get("plan", "starter")
-    max_cities = PLAN_LIMITS.get(plan, PLAN_LIMITS["starter"])["max_cities"]
+    effective = get_effective_limits(sub)
+    _, _, trial_expired = get_trial_info(sub)
+    max_cities = effective["max_cities"]
     current = len(sub.get("subscriber_cities", []))
+
+    if trial_expired:
+        return jsonify({
+            "error": "Your free trial has ended. Upgrade to add cities."
+        }), 403
 
     if current >= max_cities:
         return jsonify({
-            "error": f"Your {plan.title()} plan supports up to {max_cities} city. "
+            "error": f"Your plan supports up to {max_cities} "
+                     f"{'city' if max_cities == 1 else 'cities'}. "
                      f"Upgrade to add more."
         }), 403
 

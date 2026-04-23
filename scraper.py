@@ -97,11 +97,27 @@ PLAN_LIMITS = {
 # Subscribers
 # ---------------------------------------------------------------------------
 
+def _trial_expired(sub):
+    """Return True if this subscriber's trial ended and they never upgraded."""
+    trial_ends_at = sub.get("trial_ends_at")
+    plan = sub.get("plan", "starter")
+    if not trial_ends_at:
+        return False  # No trial set — treat as active (legacy / admin-created)
+    try:
+        ends = datetime.date.fromisoformat(trial_ends_at[:10])
+        return ends < datetime.date.today() and plan == "starter"
+    except (ValueError, TypeError):
+        return False
+
+
 def get_subscribers(pro_only=False):
-    """Return active subscribers with their cities from subscriber_cities."""
+    """Return active subscribers with their cities from subscriber_cities.
+
+    Excludes subscribers whose free trial has expired and who have not upgraded.
+    """
     headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
     params = {
-        "select": "id,email,plan,subscriber_cities(id,city,state,alert_threshold)",
+        "select": "id,email,plan,trial_ends_at,subscriber_cities(id,city,state,alert_threshold)",
         "active": "eq.true",
         "limit": "500",
     }
@@ -113,8 +129,16 @@ def get_subscribers(pro_only=False):
     if not isinstance(rows, list):
         print(f"subscribers table error ({resp.status_code}): {rows}")
         return []
-    # Only return subscribers who have at least one city configured
-    return [s for s in rows if s.get("subscriber_cities")]
+
+    valid = []
+    for s in rows:
+        if not s.get("subscriber_cities"):
+            continue
+        if _trial_expired(s):
+            print(f"  Skipping {s['email']} — trial expired, no active plan")
+            continue
+        valid.append(s)
+    return valid
 
 
 # ---------------------------------------------------------------------------

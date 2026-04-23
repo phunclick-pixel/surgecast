@@ -29,14 +29,25 @@
       padding: 1.25rem 1.5rem; margin-bottom: 1.5rem;
       display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;
     }
+    .plan-banner.trial-active { border-color: rgba(99,102,241,0.5); background: rgba(99,102,241,0.04); }
+    .plan-banner.trial-expired { border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.04); }
     .plan-name { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; color: #6666a0; }
     .plan-title { font-size: 1.2rem; font-weight: 700; color: #fff; margin-top: 0.2rem; }
+    .plan-title.expired { color: #f87171; }
     .plan-detail { font-size: 0.85rem; color: #8888a8; margin-top: 0.2rem; }
+    .trial-pill {
+      display: inline-block; background: rgba(99,102,241,0.15);
+      border: 1px solid rgba(99,102,241,0.3); border-radius: 20px;
+      padding: 0.2rem 0.7rem; font-size: 0.75rem; color: #a5b4fc;
+      margin-left: 0.6rem; vertical-align: middle;
+    }
     .upgrade-btn {
       padding: 0.6rem 1.25rem; background: #6366f1; color: #fff; font-weight: 600;
       border-radius: 8px; font-size: 0.85rem; border: none; cursor: pointer;
     }
     .upgrade-btn:hover { background: #4f46e5; }
+    .upgrade-btn.urgent { background: #ef4444; }
+    .upgrade-btn.urgent:hover { background: #dc2626; }
 
     /* Section title */
     .section-title {
@@ -115,6 +126,34 @@
 </div>
 
 <!-- Plan banner -->
+{% if trial_active %}
+<div class="plan-banner trial-active">
+  <div>
+    <div class="plan-name">Free Trial</div>
+    <div class="plan-title">
+      {{ trial_days_left }} day{{ 's' if trial_days_left != 1 else '' }} remaining
+      <span class="trial-pill">Growth features included</span>
+    </div>
+    <div class="plan-detail">
+      Up to {{ effective_limits.max_cities }} cities · Daily morning alerts
+    </div>
+  </div>
+  <button class="upgrade-btn" onclick="alert('Upgrade coming soon — email us at hello@surgecast.io')">
+    Upgrade now →
+  </button>
+</div>
+{% elif trial_expired %}
+<div class="plan-banner trial-expired">
+  <div>
+    <div class="plan-name" style="color:#f87171;">Trial Ended</div>
+    <div class="plan-title expired">Your 30-day free trial has expired</div>
+    <div class="plan-detail">Upgrade to keep receiving alerts and managing your cities.</div>
+  </div>
+  <button class="upgrade-btn urgent" onclick="alert('Email hello@surgecast.io to upgrade and restore access.')">
+    Upgrade to continue →
+  </button>
+</div>
+{% else %}
 <div class="plan-banner">
   <div>
     <div class="plan-name">Current plan</div>
@@ -130,9 +169,10 @@
   </button>
   {% endif %}
 </div>
+{% endif %}
 
 <!-- Cities -->
-<div class="section-title">Your cities ({{ cities|length }} / {{ limits.max_cities }})</div>
+<div class="section-title">Your cities ({{ cities|length }} / {{ effective_limits.max_cities }})</div>
 <div class="cities-grid" id="cities-list">
   {% for c in cities %}
   <div class="city-card" id="city-{{ c.id }}">
@@ -146,7 +186,7 @@
 </div>
 
 <!-- Add city -->
-{% if cities|length < limits.max_cities %}
+{% if not trial_expired and cities|length < effective_limits.max_cities %}
 <div class="add-city-card">
   <h3>Add a city</h3>
   <div class="add-row">
@@ -177,12 +217,20 @@
   </div>
   <div class="add-error" id="add-error"></div>
 </div>
+{% elif trial_expired %}
+<div class="add-city-card">
+  <h3>Trial expired</h3>
+  <p class="limit-note">
+    Upgrade to manage cities and continue receiving alerts.
+    Email <a href="mailto:hello@surgecast.io" style="color:#6366f1;">hello@surgecast.io</a> to get started.
+  </p>
+</div>
 {% else %}
 <div class="add-city-card">
   <h3>City limit reached</h3>
   <p class="limit-note">
-    Your {{ limits.label }} plan supports {{ limits.max_cities }}
-    {{ 'city' if limits.max_cities == 1 else 'cities' }}.
+    Your {{ effective_limits.label if effective_limits.label is defined else 'current' }} plan supports {{ effective_limits.max_cities }}
+    {{ 'city' if effective_limits.max_cities == 1 else 'cities' }}.
     Upgrade to add more.
   </p>
 </div>
