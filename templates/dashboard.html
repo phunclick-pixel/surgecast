@@ -76,7 +76,8 @@
       outline: none; margin-left: 0.3rem;
     }
     .threshold-input:focus { border-color: #6366f1; }
-    .thresh-saved { font-size: 0.75rem; color: #4ade80; margin-left: 0.3rem; display: none; }
+    .thresh-saved  { font-size: 0.75rem; color: #4ade80; margin-left: 0.3rem; display: none; }
+    .thresh-label  { font-size: 0.75rem; color: #44446a; margin-left: 0.4rem; font-style: italic; }
 
     /* Add city form */
     .add-city-card {
@@ -189,8 +190,10 @@
         <input type="number" class="threshold-input" id="thresh-{{ c.id }}"
                value="{{ c.alert_threshold }}" min="0" max="100"
                title="Events above this score trigger an alert (0–100)"
+               oninput="updateThreshLabel('{{ c.id }}', this.value)"
                onchange="setThreshold('{{ c.id }}', this.value)"
                onkeydown="if(event.key==='Enter'){this.blur();}">
+        <span class="thresh-label" id="tlabel-{{ c.id }}"></span>
         <span class="thresh-saved" id="saved-{{ c.id }}">✓ saved</span>
       </div>
     </div>
@@ -304,6 +307,28 @@
     await fetch('/dashboard/remove-city/' + id, { method: 'POST' });
     document.getElementById('city-' + id).remove();
   }
+
+  function thresholdLabel(score) {
+    score = parseInt(score);
+    if (isNaN(score)) return '';
+    if (score >= 85) return '~10,000+ people';
+    if (score >= 70) return '~2,000+ people';
+    if (score >= 55) return '~500+ people';
+    if (score >= 40) return '~100+ people';
+    if (score >= 20) return '~small local events';
+    return '~everything';
+  }
+
+  function updateThreshLabel(id, value) {
+    const el = document.getElementById('tlabel-' + id);
+    if (el) el.textContent = thresholdLabel(value);
+  }
+
+  // Initialise labels on load
+  document.querySelectorAll('.threshold-input').forEach(input => {
+    const id = input.id.replace('thresh-', '');
+    updateThreshLabel(id, input.value);
+  });
 
   async function setThreshold(id, value) {
     const val = parseInt(value);
