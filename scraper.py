@@ -321,6 +321,28 @@ def scrape_predicthq(city, existing_keys, lat, lon, radius=30):
         phq_attendance = e.get("phq_attendance")
         score = calculate_score(title, category, venue_name)
 
+        # Boost score using PredictHQ's attendance estimate.
+        # A 700-person show at a small venue deserves a higher score than
+        # a 50-person community meeting even if both are "concerts".
+        if phq_attendance:
+            if phq_attendance >= 5000:
+                score = max(score, 85)
+            elif phq_attendance >= 2000:
+                score = max(score, 75)
+            elif phq_attendance >= 1000:
+                score = max(score, 65)
+            elif phq_attendance >= 500:
+                score = max(score, 55)
+            elif phq_attendance >= 200:
+                score = max(score, 45)
+            elif phq_attendance >= 100:
+                score = max(score, 40)
+            # Under 100 — no attendance boost; base category score stands
+
+        # Skip events too small to ever alert
+        if score < 40:
+            continue
+
         event = {
             "source": "predicthq",
             "external_id": e.get("id"),
