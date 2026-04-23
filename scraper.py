@@ -18,9 +18,18 @@ SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 PREDICTHQ_KEY = os.environ["PREDICTHQ_KEY"]
 
 VENUE_SCORE_OVERRIDES = {
+    # Asheville
     "asheville yards": 85,
     "mccormick field": 70,
     "the orange peel": 55,
+    # Wilmington
+    "live oak bank pavilion": 85,   # 7,500-cap outdoor amphitheater
+    "greenfield lake amphitheatre": 80,   # city outdoor venue
+    "wilson center": 70,            # 1,700-cap performing arts center
+    "wilmington convention center": 75,   # large conventions / expos
+    "trask coliseum": 70,           # UNCW arena, 5,000 cap
+    "the soapbox": 50,              # small indie rock venue
+    "the crest": 50,                # small live music bar
 }
 
 
