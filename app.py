@@ -158,7 +158,7 @@ def get_subscriber_by_email(email):
         f"{SUPABASE_URL}/rest/v1/subscribers",
         headers=SB_HEADERS,
         params={
-            "select": "id,email,plan,active,trial_ends_at,stripe_customer_id,stripe_subscription_id,subscriber_cities(id,city,state,alert_threshold)",
+            "select": "id,email,plan,active,alert_frequency,trial_ends_at,stripe_customer_id,stripe_subscription_id,subscriber_cities(id,city,state,alert_threshold)",
             "email": f"eq.{email}",
             "limit": "1",
         },
@@ -533,6 +533,27 @@ def dashboard_set_threshold(city_id):
         headers=SB_HEADERS,
         params={"id": f"eq.{city_id}"},
         json={"alert_threshold": value},
+    )
+    return jsonify({"success": True})
+
+
+@app.route("/dashboard/set-frequency", methods=["POST"])
+@customer_required
+def dashboard_set_frequency():
+    email = session["customer_email"]
+    sub = get_subscriber_by_email(email)
+    if not sub:
+        return jsonify({"error": "Account not found."}), 404
+
+    freq = (request.get_json().get("frequency") or "daily").lower()
+    if freq not in ("daily", "weekly"):
+        return jsonify({"error": "Invalid frequency"}), 400
+
+    requests.patch(
+        f"{SUPABASE_URL}/rest/v1/subscribers",
+        headers=SB_HEADERS,
+        params={"id": f"eq.{sub['id']}"},
+        json={"alert_frequency": freq},
     )
     return jsonify({"success": True})
 

@@ -80,6 +80,24 @@
     .thresh-saved  { font-size: 0.75rem; color: #4ade80; margin-left: 0.3rem; display: none; }
     .thresh-label  { font-size: 0.75rem; color: #44446a; margin-left: 0.4rem; font-style: italic; }
 
+    /* Alert frequency */
+    .freq-card {
+      background: #0f0f24; border: 1px solid #1e1e3a; border-radius: 10px;
+      padding: 1rem 1.25rem; margin-bottom: 2rem;
+      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem;
+    }
+    .freq-label { font-size: 0.88rem; color: #e2e2f0; font-weight: 600; }
+    .freq-sub   { font-size: 0.78rem; color: #6666a0; margin-top: 0.2rem; }
+    .freq-pills { display: flex; gap: 0.5rem; }
+    .freq-pill {
+      padding: 0.4rem 1rem; border-radius: 20px; font-size: 0.82rem; font-weight: 600;
+      border: 1px solid #2a2a4a; background: transparent; color: #6666a0; cursor: pointer;
+      transition: all 0.15s;
+    }
+    .freq-pill.active { background: #6366f1; border-color: #6366f1; color: #fff; }
+    .freq-pill:hover:not(.active) { border-color: #6366f1; color: #a5b4fc; }
+    .freq-saved { font-size: 0.75rem; color: #4ade80; margin-left: 0.5rem; display: none; }
+
     /* Add city form */
     .add-city-card {
       background: #0f0f24; border: 1px dashed #2a2a4a; border-radius: 10px;
@@ -178,6 +196,29 @@
   {% endif %}
 </div>
 {% endif %}
+
+<!-- Alert frequency -->
+<div class="freq-card">
+  <div>
+    <div class="freq-label">Alert frequency</div>
+    <div class="freq-sub" id="freq-sub">
+      {% if sub.get('alert_frequency', 'daily') == 'weekly' %}
+        One email every Monday morning covering the week ahead.
+      {% else %}
+        Email every morning there's a high-impact event in the next 7 days.
+      {% endif %}
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;">
+    <div class="freq-pills">
+      <button class="freq-pill {{ 'active' if sub.get('alert_frequency','daily') == 'daily' else '' }}"
+              id="pill-daily" onclick="setFrequency('daily')">Daily</button>
+      <button class="freq-pill {{ 'active' if sub.get('alert_frequency','daily') == 'weekly' else '' }}"
+              id="pill-weekly" onclick="setFrequency('weekly')">Weekly (Mon)</button>
+    </div>
+    <span class="freq-saved" id="freq-saved">✓ saved</span>
+  </div>
+</div>
 
 <!-- Cities -->
 <div class="section-title">Your cities ({{ cities|length }} / {{ effective_limits.max_cities }})</div>
@@ -345,6 +386,25 @@
     const id = input.id.replace('thresh-', '');
     updateThreshLabel(id, input.value);
   });
+
+  async function setFrequency(freq) {
+    const res = await fetch('/dashboard/set-frequency', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ frequency: freq }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      document.getElementById('pill-daily').classList.toggle('active', freq === 'daily');
+      document.getElementById('pill-weekly').classList.toggle('active', freq === 'weekly');
+      document.getElementById('freq-sub').textContent = freq === 'weekly'
+        ? 'One email every Monday morning covering the week ahead.'
+        : 'Email every morning there\'s a high-impact event in the next 7 days.';
+      const saved = document.getElementById('freq-saved');
+      saved.style.display = 'inline';
+      setTimeout(() => saved.style.display = 'none', 2000);
+    }
+  }
 
   async function setThreshold(id, value) {
     const val = parseInt(value);

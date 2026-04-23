@@ -131,7 +131,7 @@ def get_subscribers(pro_only=False):
     """
     headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
     params = {
-        "select": "id,email,plan,trial_ends_at,subscriber_cities(id,city,state,alert_threshold)",
+        "select": "id,email,plan,alert_frequency,trial_ends_at,subscriber_cities(id,city,state,alert_threshold)",
         "active": "eq.true",
         "limit": "500",
     }
@@ -1150,9 +1150,15 @@ def run_job(afternoon=False):
         print(f"No {'Pro ' if afternoon else ''}active subscribers — nothing to do.")
         return
 
+    # Weekly subscribers only receive alerts on Mondays
+    is_monday = datetime.datetime.now().weekday() == 0  # 0 = Monday
+
     # Build city → [subscriber alert dicts] from subscriber_cities rows
     cities = {}
     for sub in subscribers:
+        freq = sub.get("alert_frequency", "daily")
+        if freq == "weekly" and not is_monday:
+            continue   # skip weekly subscribers on non-Monday days
         for city_row in sub.get("subscriber_cities", []):
             key = (city_row["city"], city_row["state"])
             cities.setdefault(key, []).append({
