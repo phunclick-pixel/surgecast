@@ -5,6 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Surgecast — Know What's Coming</title>
   <style>
+    .signin-link {
+      position: fixed; top: 1.25rem; right: 1.5rem;
+      font-size: 0.85rem; color: #6666a0; text-decoration: none;
+      background: #0f0f24; border: 1px solid #1e1e3a;
+      padding: 0.45rem 1rem; border-radius: 20px; z-index: 100;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .signin-link:hover { color: #e2e2f0; border-color: #6366f1; }
+  </style>
+  <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
@@ -207,6 +217,8 @@
   </style>
 </head>
 <body>
+
+  <a href="/dashboard/login" class="signin-link">Sign in →</a>
 
   <!-- Left: value prop -->
   <div class="left">
