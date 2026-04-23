@@ -523,6 +523,12 @@ def _scrape_uncw_general(existing_keys):
                 break
 
         score  = _score_uncw_event(title, is_sports=False)
+
+        # Skip anything below the alert floor — dorm meetings, minor
+        # campus activities, etc. will never trigger an alert anyway
+        if score < 40:
+            continue
+
         ext_id = hashlib.md5(f"uncw:{title}:{start_raw}".encode()).hexdigest()[:16]
         event  = {
             "source": "uncw",
