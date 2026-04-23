@@ -804,6 +804,101 @@ def send_alert_email(high_events, medium_events, city, to_email):
     print(f"  Alert sent -> {to_email}")
 
 
+def send_advance_email(events, city, to_email):
+    """Weekly heads-up email — HIGH events 8-30 days out."""
+    date_str  = datetime.date.today().strftime("%B %d, %Y")
+    lookahead = (datetime.date.today() + datetime.timedelta(days=30)).strftime("%B %d")
+    subject   = (f"Surgecast {city}: {len(events)} high-impact event(s) "
+                 f"coming in the next 30 days")
+
+    cards = "".join(_event_card_html(e) for e in events)
+
+    html_body = f"""
+<html>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+             background:#07070f;color:#e2e2f0;padding:32px;max-width:600px;margin:0 auto;">
+  <div style="margin-bottom:24px;">
+    <div style="font-size:20px;font-weight:800;color:#fff;">
+      Surge<span style="color:#6366f1;">cast</span>
+    </div>
+    <div style="font-size:13px;color:#6666a0;margin-top:4px;">
+      {city} &mdash; 30-Day Advance Notice &mdash; {date_str}
+    </div>
+  </div>
+
+  <div style="background:rgba(99,102,241,0.08);border:1px solid rgba(99,102,241,0.25);
+              border-radius:10px;padding:14px 18px;margin-bottom:24px;">
+    <div style="font-size:13px;color:#a5b4fc;">
+      <strong>Plan ahead.</strong> These high-impact events are coming before {lookahead}.
+      Stock up, staff up, and get ahead of your competitors.
+    </div>
+  </div>
+
+  <div style="margin-bottom:8px;">
+    <div style="color:#f59e0b;font-weight:700;font-size:11px;
+                text-transform:uppercase;letter-spacing:0.08em;margin-bottom:14px;">
+      HIGH PRIORITY &mdash; {len(events)} upcoming event(s)
+    </div>
+    {cards}
+  </div>
+
+  <div style="text-align:center;margin:28px 0;">
+    <a href="https://surgecast.io/dashboard"
+       style="background:#6366f1;color:#fff;padding:12px 28px;
+              border-radius:8px;text-decoration:none;font-weight:700;
+              font-size:14px;display:inline-block;">
+      View your dashboard &rarr;
+    </a>
+  </div>
+  <hr style="border:none;border-top:1px solid #1e1e3a;margin:24px 0;">
+  <div style="font-size:11px;color:#444466;text-align:center;">
+    Weekly advance notice from surgecast.io &middot;
+    You&rsquo;ll also get a 7-day reminder as each event approaches &middot;
+    <a href="https://surgecast.io/dashboard" style="color:#6366f1;">Manage subscription</a>
+  </div>
+</body>
+</html>"""
+
+    resend.api_key = os.environ["RESEND_API_KEY"]
+    resend.Emails.send({
+        "from": ALERT_FROM,
+        "to": [to_email],
+        "subject": subject,
+        "html": html_body,
+    })
+    print(f"  Advance alert sent -> {to_email}")
+
+
+def check_and_alert_advance(city, subscriber):
+    """Send advance alert for HIGH events 8-30 days from now."""
+    in_8_days  = (datetime.date.today() + datetime.timedelta(days=8)).isoformat()
+    in_30_days = (datetime.date.today() + datetime.timedelta(days=30)).isoformat()
+    sub_threshold = subscriber.get("alert_threshold") or ALERT_THRESHOLD_HIGH
+    to_email = subscriber["email"]
+
+    events = requests.get(
+        f"{SUPABASE_URL}/rest/v1/events",
+        headers={"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"},
+        params=[
+            ("select",      "title,venue_name,start_date,impact_score"),
+            ("city",        f"eq.{city}"),
+            ("start_date",  f"gte.{in_8_days}"),
+            ("start_date",  f"lte.{in_30_days}"),
+            ("impact_score", f"gte.{sub_threshold}"),
+            ("order",       "start_date.asc"),
+        ],
+    ).json()
+
+    if not isinstance(events, list):
+        events = []
+
+    if events:
+        print(f"  {len(events)} HIGH event(s) in 8-30 day window -> advance alert to {to_email}")
+        send_advance_email(events, city, to_email)
+    else:
+        print(f"  No HIGH events in 8-30 day window for {to_email} — skipped")
+
+
 def check_and_alert(city, subscriber):
     today     = datetime.date.today().isoformat()
     in_7_days = (datetime.date.today() + datetime.timedelta(days=7)).isoformat()
@@ -901,11 +996,44 @@ def run_job(afternoon=False):
             check_and_alert(city, sub)
 
 
+def run_advance_job():
+    """Every Monday: send HIGH-event advance alerts for the 8-30 day window."""
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    print(f"[{now}] Starting weekly advance alert job...\n")
+
+    subscribers = get_subscribers(pro_only=False)
+    if not subscribers:
+        print("No active subscribers — nothing to do.")
+        return
+
+    cities = {}
+    for sub in subscribers:
+        for city_row in sub.get("subscriber_cities", []):
+            key = (city_row["city"], city_row["state"])
+            cities.setdefault(key, []).append({
+                "email": sub["email"],
+                "plan": sub.get("plan", "starter"),
+                "alert_threshold": city_row.get("alert_threshold") or 70,
+            })
+
+    print(f"{len(subscribers)} subscriber(s) across {len(cities)} city/cities\n")
+
+    for (city, state), city_subs in cities.items():
+        print(f"[Advance] {city}, {state}")
+        for sub in city_subs:
+            check_and_alert_advance(city, sub)
+
+
 if __name__ == "__main__":
     schedule.every().day.at("08:00").do(lambda: run_job(afternoon=False))
     schedule.every().day.at("16:00").do(lambda: run_job(afternoon=True))
-    print("Scheduler active - morning scrape 08:00, Pro afternoon alerts 16:00.")
-    print("Running initial morning scrape now...\n")
+    schedule.every().monday.at("08:30").do(run_advance_job)
+
+    print("Scheduler active:")
+    print("  08:00 daily   - morning scrape + 7-day alerts")
+    print("  16:00 daily   - Pro afternoon alerts")
+    print("  08:30 Mondays - 30-day advance alerts")
+    print("\nRunning initial morning scrape now...\n")
     run_job(afternoon=False)
     while True:
         schedule.run_pending()
