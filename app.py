@@ -16,7 +16,7 @@ app.secret_key = os.environ.get("FLASK_SECRET", "change-me-in-production")
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "surgecast-admin")
-ALERT_FROM = "Surgecast <onboarding@resend.dev>"
+ALERT_FROM = "Surgecast <alerts@surgecast.io>"
 
 PLAN_LIMITS = {
     "starter": {"max_cities": 1,  "label": "Starter",  "price": "$29/mo"},

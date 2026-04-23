@@ -508,7 +508,7 @@ def print_summary(city):
 # Alerts
 # ---------------------------------------------------------------------------
 
-ALERT_FROM = "Surgecast <onboarding@resend.dev>"
+ALERT_FROM = "Surgecast <alerts@surgecast.io>"
 
 
 def _impact_bar(score):
