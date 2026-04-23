@@ -618,6 +618,142 @@ def scrape_uncw(existing_keys):
 
 
 # ---------------------------------------------------------------------------
+# Wilmington film productions  (Port City Daily RSS)
+# ---------------------------------------------------------------------------
+
+# Keywords that signal an active or imminent production in Wilmington
+_FILM_HIGH_KW = [
+    "rolling", "filming begins", "filming started", "in production",
+    "on location", "production underway", "begins filming", "starts filming",
+    "filming in wilmington", "filming at screen gems", "screen gems production",
+    "cameras rolling",
+]
+_FILM_MED_KW = [
+    "casting", "cast announced", "to film in wilmington", "will film",
+    "heading to wilmington", "coming to wilmington", "wilmington production",
+    "screen gems", "leland", "filming in nc", "filming in north carolina",
+]
+_FILM_SKIP_KW = [
+    "screening", "film festival", "film fest", "film series", "documentary about",
+    "retrospective", "incentive", "tax credit", "state budget", "grant",
+    "film school", "student film",
+]
+
+
+def _score_film_article(title, description):
+    """Return (score, label) for a film news article, or (0, '') to skip."""
+    text = (title + " " + description).lower()
+
+    # Skip non-production articles
+    if any(kw in text for kw in _FILM_SKIP_KW):
+        return 0, ""
+
+    if any(kw in text for kw in _FILM_HIGH_KW):
+        return 75, "Active production"
+    if any(kw in text for kw in _FILM_MED_KW):
+        return 50, "Upcoming production"
+    return 0, ""
+
+
+def scrape_wilmington_film(existing_keys):
+    """Pull Port City Daily film RSS; surface active/upcoming Wilmington productions."""
+    import xml.etree.ElementTree as ET
+
+    print("-- Wilmington Film (Port City Daily RSS) ---")
+    url = "https://www.portcitydaily.com/tag/film/feed/"
+    today = datetime.date.today()
+    cutoff = today - datetime.timedelta(days=90)   # ignore old articles
+    added = 0
+
+    try:
+        resp = requests.get(
+            url,
+            headers={"User-Agent": "Surgecast/1.0 (surgecast.io)"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        root = ET.fromstring(resp.content)
+    except Exception as e:
+        print(f"Film RSS error: {e}\n")
+        return 0
+
+    SB = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
+          "Content-Type": "application/json"}
+
+    for item in root.findall(".//item"):
+        title_el   = item.find("title")
+        link_el    = item.find("link")
+        date_el    = item.find("pubDate")
+        desc_el    = item.find("description")
+
+        if title_el is None:
+            continue
+
+        title = (title_el.text or "").strip()
+        link  = (link_el.text  or "").strip() if link_el  is not None else ""
+        desc  = (desc_el.text  or "").strip() if desc_el  is not None else ""
+        pub_str = (date_el.text or "").strip() if date_el is not None else ""
+
+        # Parse pub date  (e.g. "Mon, 24 Feb 2025 12:00:00 +0000")
+        pub_date = today
+        for fmt in ("%a, %d %b %Y %H:%M:%S %z", "%a, %d %b %Y %H:%M:%S %Z"):
+            try:
+                pub_date = datetime.datetime.strptime(pub_str, fmt).date()
+                break
+            except ValueError:
+                continue
+
+        if pub_date < cutoff:
+            continue   # too old to be actionable
+
+        score, label = _score_film_article(title, desc)
+        if score == 0:
+            continue
+
+        # Unique key — based on URL so re-runs don't duplicate
+        key = f"film-{link}" if link else f"film-{title[:80]}"
+        if key in existing_keys:
+            continue
+
+        # Display title: prepend label so it reads well in the email
+        display_title = f"[Film] {title}"
+
+        # Event date: use pub_date (when cameras started rolling / announcement)
+        # For "upcoming" articles, nudge 14 days forward so it lands in the
+        # advance window rather than the immediate 7-day window.
+        event_date = pub_date
+        if score == 50:
+            event_date = pub_date + datetime.timedelta(days=14)
+
+        # Don't store events in the past
+        if event_date < today:
+            event_date = today
+
+        payload = {
+            "external_id": key,
+            "title": display_title,
+            "venue_name": "Screen Gems Studios / Wilmington area",
+            "city": "Wilmington",
+            "state": "NC",
+            "start_date": event_date.isoformat(),
+            "impact_score": score,
+            "source": "film",
+        }
+        r = requests.post(
+            f"{SUPABASE_URL}/rest/v1/events",
+            headers={**SB, "Prefer": "resolution=ignore-duplicates"},
+            json=payload,
+        )
+        if r.status_code in (200, 201):
+            existing_keys.add(key)
+            added += 1
+            print(f"  + [{score}] {display_title[:70]}")
+
+    print(f"Film scraper: {added} new event(s)\n")
+    return added
+
+
+# ---------------------------------------------------------------------------
 # Dedup + summary
 # ---------------------------------------------------------------------------
 
@@ -1000,6 +1136,7 @@ def run_job(afternoon=False):
 
             if city.lower() == "wilmington" and state.upper() == "NC":
                 scrape_uncw(existing_keys)
+                scrape_wilmington_film(existing_keys)
 
             remove_duplicates(city)
             print_summary(city)
