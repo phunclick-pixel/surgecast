@@ -69,6 +69,15 @@
     }
     .remove-btn:hover { border-color: #ef4444; color: #f87171; }
 
+    .threshold-input {
+      width: 54px; padding: 0.15rem 0.4rem; background: #07070f;
+      border: 1px solid rgba(100,100,200,0.2); border-radius: 5px;
+      color: #a0a0c0; font-size: 0.8rem; text-align: center;
+      outline: none; margin-left: 0.3rem;
+    }
+    .threshold-input:focus { border-color: #6366f1; }
+    .thresh-saved { font-size: 0.75rem; color: #4ade80; margin-left: 0.3rem; display: none; }
+
     /* Add city form */
     .add-city-card {
       background: #0f0f24; border: 1px dashed #2a2a4a; border-radius: 10px;
@@ -175,7 +184,15 @@
   <div class="city-card" id="city-{{ c.id }}">
     <div>
       <div class="city-name">{{ c.city }}, {{ c.state }}</div>
-      <div class="city-meta">Alert threshold: {{ c.alert_threshold }}</div>
+      <div class="city-meta">
+        Alert threshold:
+        <input type="number" class="threshold-input" id="thresh-{{ c.id }}"
+               value="{{ c.alert_threshold }}" min="0" max="100"
+               title="Events above this score trigger an alert (0–100)"
+               onchange="setThreshold('{{ c.id }}', this.value)"
+               onkeydown="if(event.key==='Enter'){this.blur();}">
+        <span class="thresh-saved" id="saved-{{ c.id }}">✓ saved</span>
+      </div>
     </div>
     <button class="remove-btn" onclick="removeCity('{{ c.id }}', '{{ c.city }}')">Remove</button>
   </div>
@@ -286,6 +303,22 @@
     if (!confirm('Remove ' + name + '?')) return;
     await fetch('/dashboard/remove-city/' + id, { method: 'POST' });
     document.getElementById('city-' + id).remove();
+  }
+
+  async function setThreshold(id, value) {
+    const val = parseInt(value);
+    if (isNaN(val) || val < 0 || val > 100) return;
+    const saved = document.getElementById('saved-' + id);
+    const res  = await fetch('/dashboard/set-threshold/' + id, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ threshold: val }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      saved.style.display = 'inline';
+      setTimeout(() => saved.style.display = 'none', 2000);
+    }
   }
 </script>
 

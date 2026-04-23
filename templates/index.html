@@ -251,8 +251,8 @@
   <!-- Right: signup form -->
   <div class="right">
     <div class="card">
-      <h2>Get early access</h2>
-      <p>Free during beta. No credit card required.</p>
+      <h2>Start your free trial</h2>
+      <p>30 days free · No credit card required.</p>
 
       <form id="form">
         <div class="form-group">
@@ -286,7 +286,7 @@
           </div>
         </div>
 
-        <button type="submit" id="btn">Get Early Access →</button>
+        <button type="submit" id="btn">Start free trial →</button>
 
         <div class="message" id="msg"></div>
       </form>
@@ -321,7 +321,7 @@
 
         if (data.success) {
           msg.className = 'message success';
-          msg.textContent = "You're in! Check your inbox tomorrow morning for your first alert.";
+          msg.textContent = "You're in! Your 30-day free trial starts now. Check your inbox tomorrow morning for your first alert.";
           msg.style.display = 'block';
           form.reset();
           btn.textContent = 'Done ✓';

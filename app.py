@@ -449,6 +449,34 @@ def dashboard_remove_city(city_id):
     return jsonify({"deleted": True})
 
 
+@app.route("/dashboard/set-threshold/<city_id>", methods=["POST"])
+@customer_required
+def dashboard_set_threshold(city_id):
+    email = session["customer_email"]
+    sub = get_subscriber_by_email(email)
+    if not sub:
+        return jsonify({"error": "Account not found."}), 404
+
+    # Verify this city belongs to this subscriber
+    owned = [c for c in sub.get("subscriber_cities", []) if str(c["id"]) == city_id]
+    if not owned:
+        return jsonify({"error": "Not found."}), 404
+
+    try:
+        value = int(request.get_json().get("threshold", 70))
+        value = max(0, min(100, value))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid value"}), 400
+
+    requests.patch(
+        f"{SUPABASE_URL}/rest/v1/subscriber_cities",
+        headers=SB_HEADERS,
+        params={"id": f"eq.{city_id}"},
+        json={"alert_threshold": value},
+    )
+    return jsonify({"success": True})
+
+
 @app.route("/dashboard/logout")
 def dashboard_logout():
     session.pop("customer_email", None)
