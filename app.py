@@ -695,6 +695,97 @@ def admin_delete(sub_id):
     return jsonify({"deleted": True})
 
 
+@app.route("/admin/add-subscriber", methods=["POST"])
+@admin_required
+def admin_add_subscriber():
+    data  = request.get_json()
+    email = (data.get("email") or "").strip().lower()
+    city  = (data.get("city")  or "").strip().title()
+    state = (data.get("state") or "").strip().upper()
+    plan  = (data.get("plan")  or "starter").lower()
+
+    if not email or not is_valid_email(email):
+        return jsonify({"error": "Valid email is required."}), 400
+    if not city or not state:
+        return jsonify({"error": "City and state are required."}), 400
+    if plan not in PLAN_LIMITS:
+        plan = "starter"
+
+    # Set a 30-day trial end date (gives full access immediately)
+    trial_ends_at = (
+        datetime.datetime.utcnow() + datetime.timedelta(days=30)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Create or retrieve subscriber
+    resp = requests.post(
+        f"{SUPABASE_URL}/rest/v1/subscribers",
+        headers={**SB_HEADERS, "Prefer": "return=representation,resolution=merge-duplicates"},
+        json={"email": email, "active": True, "plan": plan,
+              "trial_ends_at": trial_ends_at},
+    )
+    if resp.status_code not in (200, 201):
+        return jsonify({"error": "Could not create subscriber."}), 500
+
+    sub_list = resp.json()
+    sub_id = sub_list[0]["id"] if isinstance(sub_list, list) and sub_list else None
+    if not sub_id:
+        return jsonify({"error": "Could not retrieve subscriber id."}), 500
+
+    # Determine alert threshold via Nominatim
+    threshold = get_city_threshold(city, state)
+
+    # Add city (ignore duplicate)
+    requests.post(
+        f"{SUPABASE_URL}/rest/v1/subscriber_cities",
+        headers={**SB_HEADERS, "Prefer": "resolution=ignore-duplicates"},
+        json={"subscriber_id": sub_id, "city": city,
+              "state": state, "alert_threshold": threshold},
+    )
+
+    return jsonify({"success": True, "subscriber_id": str(sub_id)})
+
+
+@app.route("/admin/send-report/<sub_id>", methods=["POST"])
+@admin_required
+def admin_send_report(sub_id):
+    """Manually trigger an alert email for one subscriber."""
+    # Fetch subscriber + their cities
+    rows = requests.get(
+        f"{SUPABASE_URL}/rest/v1/subscribers",
+        headers=SB_HEADERS,
+        params={
+            "id": f"eq.{sub_id}",
+            "select": "id,email,plan,active,trial_ends_at,"
+                      "subscriber_cities(id,city,state,alert_threshold)",
+            "limit": "1",
+        },
+    ).json()
+
+    if not rows:
+        return jsonify({"error": "Subscriber not found."}), 404
+
+    sub = rows[0]
+    cities = sub.get("subscriber_cities", [])
+    if not cities:
+        return jsonify({"error": "Subscriber has no cities configured."}), 400
+
+    try:
+        from scraper import check_and_alert
+        sent = 0
+        for city_row in cities:
+            sub_dict = {
+                "email":           sub["email"],
+                "plan":            sub.get("plan", "starter"),
+                "alert_threshold": city_row.get("alert_threshold") or 70,
+            }
+            check_and_alert(city_row["city"], sub_dict)
+            sent += 1
+        return jsonify({"sent": sent, "cities": len(cities)})
+    except Exception as e:
+        print(f"admin_send_report error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
 # ---------------------------------------------------------------------------
 # Stripe — pricing page, checkout, webhook, billing portal
 # ---------------------------------------------------------------------------
