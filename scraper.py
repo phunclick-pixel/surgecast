@@ -149,7 +149,7 @@ _geocode_cache = {}
 
 
 def geocode_city(city, state):
-    """Return (lat, lon) for a city via OpenStreetMap Nominatim. Cached per run."""
+    """Return (lat, lon, importance) for a city via Nominatim. Cached per run."""
     key = (city.lower(), state.upper())
     if key in _geocode_cache:
         return _geocode_cache[key]
@@ -162,13 +162,27 @@ def geocode_city(city, state):
         )
         results = resp.json()
         if results:
-            lat, lon = float(results[0]["lat"]), float(results[0]["lon"])
-            _geocode_cache[key] = (lat, lon)
-            return lat, lon
+            lat        = float(results[0]["lat"])
+            lon        = float(results[0]["lon"])
+            importance = float(results[0].get("importance", 0.45))
+            _geocode_cache[key] = (lat, lon, importance)
+            return lat, lon, importance
     except Exception as e:
         print(f"Geocode error for {city}, {state}: {e}")
-    _geocode_cache[key] = (None, None)
-    return None, None
+    _geocode_cache[key] = (None, None, 0.45)
+    return None, None, 0.45
+
+
+def _search_radius(importance):
+    """Return PredictHQ search radius in miles based on city size."""
+    if importance >= 0.70:
+        return 30   # Major city  (Nashville, Atlanta …)
+    elif importance >= 0.55:
+        return 20   # Mid-size    (Asheville, Savannah …)
+    elif importance >= 0.40:
+        return 15   # Small city  (Freeport ME, Staunton VA …)
+    else:
+        return 10   # Very small town
 
 
 # ---------------------------------------------------------------------------
@@ -248,20 +262,20 @@ def scrape_ticketmaster(city, state):
 #   ALTER TABLE events ADD COLUMN IF NOT EXISTS phq_attendance integer;
 # ---------------------------------------------------------------------------
 
-def scrape_predicthq(city, existing_keys, lat, lon):
-    """Pulls upcoming events within 30 miles of (lat, lon) from PredictHQ."""
+def scrape_predicthq(city, existing_keys, lat, lon, radius=30):
+    """Pulls upcoming events within `radius` miles of (lat, lon) from PredictHQ."""
     url = "https://api.predicthq.com/v1/events/"
     headers = {
         "Authorization": f"Bearer {PREDICTHQ_KEY}",
         "Accept": "application/json",
     }
     params = {
-        "within": f"30mi@{lat},{lon}",
+        "within": f"{radius}mi@{lat},{lon}",
         "active.gte": datetime.date.today().isoformat(),
         "limit": 200,
     }
 
-    print("── PredictHQ ──────────────────────────────────────────")
+    print(f"-- PredictHQ ({radius}-mile radius) --")
     try:
         resp = requests.get(url, headers=headers, params=params, timeout=15)
         resp.raise_for_status()
@@ -271,7 +285,7 @@ def scrape_predicthq(city, existing_keys, lat, lon):
         return 0
 
     results = data.get("results", [])
-    print(f"Found {len(results)} events near {city} (30-mile radius)")
+    print(f"Found {len(results)} events near {city} ({radius}-mile radius)")
 
     saved = 0
     for e in results:
@@ -674,9 +688,11 @@ def run_job(afternoon=False):
             existing_keys = get_existing_keys(city)
             print(f"Loaded {len(existing_keys)} existing key(s) for cross-source dedup\n")
 
-            lat, lon = geocode_city(city, state)
+            lat, lon, importance = geocode_city(city, state)
             if lat and lon:
-                scrape_predicthq(city, existing_keys, lat, lon)
+                radius = _search_radius(importance)
+                print(f"City size score: {importance:.3f} → {radius}-mile search radius")
+                scrape_predicthq(city, existing_keys, lat, lon, radius=radius)
             else:
                 print(f"PredictHQ: could not geocode {city}, {state} — skipping\n")
 
