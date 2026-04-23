@@ -121,6 +121,9 @@
   <div class="logo">Surge<span>cast</span></div>
   <div class="topbar-right">
     <span class="email-badge">{{ sub.email }}</span>
+    {% if sub.stripe_customer_id %}
+    <a href="/billing" class="logout">Manage billing</a>
+    {% endif %}
     <a href="/dashboard/logout" class="logout">Sign out</a>
   </div>
 </div>
@@ -138,9 +141,7 @@
       Up to {{ effective_limits.max_cities }} cities · Daily morning alerts
     </div>
   </div>
-  <button class="upgrade-btn" onclick="alert('Upgrade coming soon — email us at hello@surgecast.io')">
-    Upgrade now →
-  </button>
+  <a href="/upgrade" class="upgrade-btn" style="text-decoration:none;display:inline-block;">Upgrade now →</a>
 </div>
 {% elif trial_expired %}
 <div class="plan-banner trial-expired">
@@ -149,9 +150,7 @@
     <div class="plan-title expired">Your 30-day free trial has expired</div>
     <div class="plan-detail">Upgrade to keep receiving alerts and managing your cities.</div>
   </div>
-  <button class="upgrade-btn urgent" onclick="alert('Email hello@surgecast.io to upgrade and restore access.')">
-    Upgrade to continue →
-  </button>
+  <a href="/upgrade" class="upgrade-btn urgent" style="text-decoration:none;display:inline-block;">Upgrade to continue →</a>
 </div>
 {% else %}
 <div class="plan-banner">
@@ -164,9 +163,7 @@
     </div>
   </div>
   {% if plan != 'pro' %}
-  <button class="upgrade-btn" onclick="alert('Upgrade coming soon — email us at hello@surgecast.io')">
-    Upgrade plan →
-  </button>
+  <a href="/upgrade" class="upgrade-btn" style="text-decoration:none;display:inline-block;">Upgrade plan →</a>
   {% endif %}
 </div>
 {% endif %}

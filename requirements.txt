@@ -7,3 +7,4 @@ schedule
 resend
 flask
 gunicorn
+stripe

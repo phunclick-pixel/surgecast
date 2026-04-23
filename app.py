@@ -5,6 +5,7 @@ import re
 
 import requests
 import resend
+import stripe
 from dotenv import load_dotenv
 from flask import (Flask, jsonify, redirect, render_template,
                    request, session, url_for)
@@ -18,6 +19,19 @@ SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_KEY"]
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "surgecast-admin")
 ALERT_FROM = "Surgecast <alerts@surgecast.io>"
+
+# Stripe — keys added via Railway env vars
+STRIPE_SECRET_KEY      = os.environ.get("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET  = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_PRICE_STARTER   = os.environ.get("STRIPE_PRICE_STARTER", "")
+STRIPE_PRICE_GROWTH    = os.environ.get("STRIPE_PRICE_GROWTH", "")
+STRIPE_PRICE_PRO       = os.environ.get("STRIPE_PRICE_PRO", "")
+
+STRIPE_PRICES = {
+    "starter": STRIPE_PRICE_STARTER,
+    "growth":  STRIPE_PRICE_GROWTH,
+    "pro":     STRIPE_PRICE_PRO,
+}
 
 PLAN_LIMITS = {
     "starter": {"max_cities": 1,  "label": "Starter",  "price": "$29/mo"},
@@ -130,7 +144,7 @@ def get_subscriber_by_email(email):
         f"{SUPABASE_URL}/rest/v1/subscribers",
         headers=SB_HEADERS,
         params={
-            "select": "id,email,plan,active,trial_ends_at,subscriber_cities(id,city,state,alert_threshold)",
+            "select": "id,email,plan,active,trial_ends_at,stripe_customer_id,stripe_subscription_id,subscriber_cities(id,city,state,alert_threshold)",
             "email": f"eq.{email}",
             "limit": "1",
         },
@@ -546,6 +560,188 @@ def admin_delete(sub_id):
         params={"id": f"eq.{sub_id}"},
     )
     return jsonify({"deleted": True})
+
+
+# ---------------------------------------------------------------------------
+# Stripe — pricing page, checkout, webhook, billing portal
+# ---------------------------------------------------------------------------
+
+@app.route("/upgrade")
+@customer_required
+def upgrade_page():
+    email = session["customer_email"]
+    sub = get_subscriber_by_email(email)
+    if not sub:
+        return redirect(url_for("dashboard_login"))
+    plan = sub.get("plan", "starter")
+    trial_active, trial_days_left, trial_expired = get_trial_info(sub)
+    return render_template("upgrade.html", sub=sub, plan=plan,
+                           plan_info=PLAN_LIMITS,
+                           trial_active=trial_active,
+                           trial_days_left=trial_days_left)
+
+
+@app.route("/upgrade/checkout/<plan>", methods=["POST"])
+@customer_required
+def upgrade_checkout(plan):
+    if plan not in PLAN_LIMITS:
+        return "Invalid plan", 400
+
+    price_id = STRIPE_PRICES.get(plan)
+    if not price_id:
+        return "Stripe price not configured — contact hello@surgecast.io", 500
+
+    email = session["customer_email"]
+    sub = get_subscriber_by_email(email)
+    if not sub:
+        return redirect(url_for("dashboard_login"))
+
+    stripe.api_key = STRIPE_SECRET_KEY
+
+    # Re-use existing Stripe customer if we have one
+    customer_id = sub.get("stripe_customer_id") or None
+
+    checkout = stripe.checkout.Session.create(
+        customer=customer_id,
+        customer_email=None if customer_id else email,
+        payment_method_types=["card"],
+        line_items=[{"price": price_id, "quantity": 1}],
+        mode="subscription",
+        allow_promotion_codes=True,
+        success_url=url_for("upgrade_success", _external=True)
+                    + "?session_id={CHECKOUT_SESSION_ID}",
+        cancel_url=url_for("upgrade_page", _external=True),
+        metadata={"subscriber_id": str(sub["id"]), "plan": plan},
+        subscription_data={
+            "metadata": {"subscriber_id": str(sub["id"]), "plan": plan}
+        },
+    )
+    return redirect(checkout.url, code=303)
+
+
+@app.route("/upgrade/success")
+@customer_required
+def upgrade_success():
+    session_id = request.args.get("session_id", "")
+    plan_name = "your new plan"
+
+    if session_id and STRIPE_SECRET_KEY:
+        try:
+            stripe.api_key = STRIPE_SECRET_KEY
+            cs = stripe.checkout.Session.retrieve(session_id)
+            plan_name = PLAN_LIMITS.get(
+                cs.metadata.get("plan", ""), {}
+            ).get("label", "your new plan")
+        except Exception:
+            pass
+
+    return render_template("upgrade_success.html", plan_name=plan_name)
+
+
+@app.route("/billing")
+@customer_required
+def billing_portal():
+    """Stripe Customer Portal — lets subscribers manage/cancel their plan."""
+    email = session["customer_email"]
+    sub = get_subscriber_by_email(email)
+    if not sub or not sub.get("stripe_customer_id"):
+        # No Stripe record yet — send them to upgrade page
+        return redirect(url_for("upgrade_page"))
+
+    stripe.api_key = STRIPE_SECRET_KEY
+    portal = stripe.billing_portal.Session.create(
+        customer=sub["stripe_customer_id"],
+        return_url=url_for("dashboard", _external=True),
+    )
+    return redirect(portal.url, code=303)
+
+
+@app.route("/stripe/webhook", methods=["POST"])
+def stripe_webhook():
+    payload    = request.get_data()
+    sig_header = request.headers.get("Stripe-Signature", "")
+
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, STRIPE_WEBHOOK_SECRET
+        )
+    except (ValueError, stripe.error.SignatureVerificationError) as e:
+        print(f"Stripe webhook signature error: {e}")
+        return jsonify({"error": "Invalid signature"}), 400
+
+    etype = event["type"]
+    obj   = event["data"]["object"]
+    print(f"Stripe event: {etype}")
+
+    # ── Payment succeeded / subscription created ──────────────────────────
+    if etype == "checkout.session.completed":
+        sub_id      = obj.get("metadata", {}).get("subscriber_id")
+        plan        = obj.get("metadata", {}).get("plan", "starter")
+        customer_id = obj.get("customer")
+        stripe_sub  = obj.get("subscription")
+
+        if sub_id:
+            requests.patch(
+                f"{SUPABASE_URL}/rest/v1/subscribers",
+                headers=SB_HEADERS,
+                params={"id": f"eq.{sub_id}"},
+                json={"plan": plan,
+                      "stripe_customer_id": customer_id,
+                      "stripe_subscription_id": stripe_sub,
+                      "active": True},
+            )
+            print(f"  → subscriber {sub_id} upgraded to {plan}")
+
+    # ── Plan changed via Customer Portal ─────────────────────────────────
+    elif etype == "customer.subscription.updated":
+        customer_id = obj.get("customer")
+        # Derive plan from the price ID on the subscription
+        price_id = None
+        items = obj.get("items", {}).get("data", [])
+        if items:
+            price_id = items[0].get("price", {}).get("id")
+
+        new_plan = next(
+            (p for p, pid in STRIPE_PRICES.items() if pid and pid == price_id),
+            None,
+        )
+        if new_plan and customer_id:
+            rows = requests.get(
+                f"{SUPABASE_URL}/rest/v1/subscribers",
+                headers=SB_HEADERS,
+                params={"stripe_customer_id": f"eq.{customer_id}",
+                        "select": "id"},
+            ).json()
+            if rows:
+                requests.patch(
+                    f"{SUPABASE_URL}/rest/v1/subscribers",
+                    headers=SB_HEADERS,
+                    params={"id": f"eq.{rows[0]['id']}"},
+                    json={"plan": new_plan},
+                )
+                print(f"  → customer {customer_id} plan updated to {new_plan}")
+
+    # ── Subscription cancelled ────────────────────────────────────────────
+    elif etype == "customer.subscription.deleted":
+        customer_id = obj.get("customer")
+        if customer_id:
+            rows = requests.get(
+                f"{SUPABASE_URL}/rest/v1/subscribers",
+                headers=SB_HEADERS,
+                params={"stripe_customer_id": f"eq.{customer_id}",
+                        "select": "id"},
+            ).json()
+            if rows:
+                requests.patch(
+                    f"{SUPABASE_URL}/rest/v1/subscribers",
+                    headers=SB_HEADERS,
+                    params={"id": f"eq.{rows[0]['id']}"},
+                    json={"plan": "starter",
+                          "stripe_subscription_id": None},
+                )
+                print(f"  → customer {customer_id} downgraded to starter")
+
+    return jsonify({"received": True})
 
 
 if __name__ == "__main__":
