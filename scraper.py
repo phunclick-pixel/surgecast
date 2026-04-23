@@ -776,11 +776,19 @@ def send_alert_email(high_events, medium_events, city, to_email):
     </div>
   </div>
   {sections_html}
+  <div style="text-align:center;margin:28px 0;">
+    <a href="https://surgecast.io/dashboard"
+       style="background:#6366f1;color:#fff;padding:12px 28px;
+              border-radius:8px;text-decoration:none;font-weight:700;
+              font-size:14px;display:inline-block;">
+      View your dashboard &rarr;
+    </a>
+  </div>
   <hr style="border:none;border-top:1px solid #1e1e3a;margin:24px 0;">
-  <div style="font-size:11px;color:#444466;">
-    Reply to manage your subscription &middot;
+  <div style="font-size:11px;color:#444466;text-align:center;">
+    You&rsquo;re receiving this because you signed up at surgecast.io &middot;
     <a href="https://surgecast.io/dashboard" style="color:#6366f1;">
-      View dashboard
+      Manage subscription
     </a>
   </div>
 </body>
@@ -793,7 +801,7 @@ def send_alert_email(high_events, medium_events, city, to_email):
         "subject": subject,
         "html": html_body,
     })
-    print(f"  Alert sent → {to_email}")
+    print(f"  Alert sent -> {to_email}")
 
 
 def check_and_alert(city, subscriber):
