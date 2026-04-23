@@ -581,6 +581,21 @@ def _scrape_uncw_sports(existing_keys):
 
         if start_date < today:
             continue
+
+        # ── Home-game filter ──────────────────────────────────────────────
+        # Location field is the primary signal: home games say "Wilmington"
+        # Title is the fallback: "vs" = home, "at" / "@" = away
+        loc_lower   = location.lower()
+        title_lower = title.lower()
+        if location.strip():
+            if "wilmington" not in loc_lower:
+                continue          # away game — skip
+        else:
+            # No location set; use title convention
+            if re.search(r'\s+at\s+|\s+@\s+', title_lower):
+                continue          # away game — skip
+        # ─────────────────────────────────────────────────────────────────
+
         if is_duplicate(title, start_date, existing_keys):
             continue
 
