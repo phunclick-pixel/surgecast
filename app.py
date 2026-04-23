@@ -27,6 +27,9 @@ STRIPE_PRICE_STARTER   = os.environ.get("STRIPE_PRICE_STARTER", "")
 STRIPE_PRICE_GROWTH    = os.environ.get("STRIPE_PRICE_GROWTH", "")
 STRIPE_PRICE_PRO       = os.environ.get("STRIPE_PRICE_PRO", "")
 
+# Admin signup notifications — set ADMIN_NOTIFY_EMAIL in Railway env vars
+ADMIN_NOTIFY_EMAIL = os.environ.get("ADMIN_NOTIFY_EMAIL", "")
+
 STRIPE_PRICES = {
     "starter": STRIPE_PRICE_STARTER,
     "growth":  STRIPE_PRICE_GROWTH,
@@ -170,6 +173,49 @@ def send_login_code(email, code):
     })
 
 
+def send_signup_notification(email, city, state):
+    """Email the admin when a new subscriber signs up."""
+    if not ADMIN_NOTIFY_EMAIL:
+        return
+    try:
+        resend.api_key = os.environ["RESEND_API_KEY"]
+        resend.Emails.send({
+            "from": ALERT_FROM,
+            "to": [ADMIN_NOTIFY_EMAIL],
+            "subject": f"New Surgecast signup: {email}",
+            "html": f"""
+            <html><body style="font-family:-apple-system,sans-serif;
+                               background:#07070f;color:#e2e2f0;padding:2rem;">
+              <h2 style="color:#6366f1;">New signup</h2>
+              <table style="font-size:0.95rem;border-collapse:collapse;">
+                <tr><td style="color:#8888a8;padding:4px 16px 4px 0;">Email</td>
+                    <td style="color:#fff;">{email}</td></tr>
+                <tr><td style="color:#8888a8;padding:4px 16px 4px 0;">City</td>
+                    <td style="color:#fff;">{city}, {state}</td></tr>
+                <tr><td style="color:#8888a8;padding:4px 16px 4px 0;">Time</td>
+                    <td style="color:#fff;">
+                      {datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")}
+                    </td></tr>
+                <tr><td style="color:#8888a8;padding:4px 16px 4px 0;">Trial ends</td>
+                    <td style="color:#fff;">
+                      {(datetime.datetime.utcnow() +
+                        datetime.timedelta(days=30)).strftime("%Y-%m-%d")}
+                    </td></tr>
+              </table>
+              <div style="margin-top:1.5rem;">
+                <a href="https://surgecast.io/admin"
+                   style="background:#6366f1;color:#fff;padding:0.6rem 1.25rem;
+                          border-radius:8px;text-decoration:none;font-weight:600;">
+                  View in admin →
+                </a>
+              </div>
+            </body></html>
+            """,
+        })
+    except Exception as e:
+        print(f"Signup notification error: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Public routes
 # ---------------------------------------------------------------------------
@@ -252,6 +298,9 @@ def subscribe():
             json={"subscriber_id": sub_id, "city": city,
                   "state": state, "alert_threshold": threshold},
         )
+        # Notify admin of new signup (only fires for genuinely new accounts)
+        if is_new_account:
+            send_signup_notification(email, city, state)
 
     return jsonify({"success": True})
 
