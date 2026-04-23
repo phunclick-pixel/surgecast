@@ -80,7 +80,39 @@
                   border-radius: 6px; color: #555570; font-size: 0.78rem; cursor: pointer; }
     .delete-btn:hover { border-color: #ef4444; color: #f87171; }
 
+    .report-btn { padding: 0.3rem 0.6rem; background: transparent; border: 1px solid #2a2a4a;
+                  border-radius: 6px; color: #6366f1; font-size: 0.78rem; cursor: pointer;
+                  margin-right: 0.4rem; }
+    .report-btn:hover { border-color: #6366f1; background: rgba(99,102,241,0.08); }
+    .report-btn:disabled { opacity: 0.4; cursor: default; }
+
     .flash { font-size: 0.72rem; color: #4ade80; margin-left: 0.4rem; display: none; }
+
+    /* Add client card */
+    .add-client {
+      background: #0f0f24; border: 1px dashed #2a2a4a; border-radius: 12px;
+      padding: 1.25rem 1.5rem; margin-bottom: 2rem;
+    }
+    .add-client h3 { font-size: 0.85rem; font-weight: 600; color: #fff; margin-bottom: 1rem; }
+    .add-client-row { display: flex; gap: 0.6rem; flex-wrap: wrap; align-items: flex-end; }
+    .add-client-row input, .add-client-row select {
+      padding: 0.5rem 0.75rem; background: #07070f;
+      border: 1px solid rgba(100,100,200,0.2); border-radius: 7px;
+      color: #e2e2f0; font-size: 0.85rem; outline: none;
+    }
+    .add-client-row input:focus, .add-client-row select:focus { border-color: #6366f1; }
+    .add-client-row input[placeholder="client@business.com"] { flex: 1; min-width: 200px; }
+    .add-client-row input[placeholder="City"] { width: 120px; }
+    .add-client-row select { width: 80px; appearance: none; cursor: pointer; }
+    .add-client-row select.plan-sel { width: 110px; }
+    .add-client-btn {
+      padding: 0.5rem 1.1rem; background: #6366f1; color: #fff;
+      border: none; border-radius: 7px; font-size: 0.85rem; font-weight: 600;
+      cursor: pointer; white-space: nowrap;
+    }
+    .add-client-btn:hover { background: #4f46e5; }
+    .add-client-btn:disabled { background: #2a2a50; cursor: default; }
+    .add-client-msg { font-size: 0.8rem; margin-top: 0.6rem; display: none; }
   </style>
 </head>
 <body>
@@ -122,6 +154,38 @@
 </div>
 {% endif %}
 
+<!-- Add client -->
+<div class="add-client">
+  <h3>Add new client</h3>
+  <div class="add-client-row">
+    <input type="email" id="ac-email" placeholder="client@business.com">
+    <input type="text"  id="ac-city"  placeholder="City">
+    <select id="ac-state">
+      <option value="">State</option>
+      <option>AL</option><option>AK</option><option>AZ</option><option>AR</option>
+      <option>CA</option><option>CO</option><option>CT</option><option>DE</option>
+      <option>FL</option><option>GA</option><option>HI</option><option>ID</option>
+      <option>IL</option><option>IN</option><option>IA</option><option>KS</option>
+      <option>KY</option><option>LA</option><option>ME</option><option>MD</option>
+      <option>MA</option><option>MI</option><option>MN</option><option>MS</option>
+      <option>MO</option><option>MT</option><option>NE</option><option>NV</option>
+      <option>NH</option><option>NJ</option><option>NM</option><option>NY</option>
+      <option>NC</option><option>ND</option><option>OH</option><option>OK</option>
+      <option>OR</option><option>PA</option><option>RI</option><option>SC</option>
+      <option>SD</option><option>TN</option><option>TX</option><option>UT</option>
+      <option>VT</option><option>VA</option><option>WA</option><option>WV</option>
+      <option>WI</option><option>WY</option>
+    </select>
+    <select id="ac-plan" class="plan-sel">
+      <option value="starter">Starter</option>
+      <option value="growth">Growth</option>
+      <option value="pro">Pro</option>
+    </select>
+    <button class="add-client-btn" id="ac-btn" onclick="addClient()">Add client</button>
+  </div>
+  <div class="add-client-msg" id="ac-msg"></div>
+</div>
+
 <div class="table-wrap">
   <div class="table-header"><h3>Subscribers</h3></div>
   <table>
@@ -132,7 +196,7 @@
         <th>Plan</th>
         <th>Active</th>
         <th>Signed up</th>
-        <th></th>
+        <th>Actions</th>
       </tr>
     </thead>
     <tbody>
@@ -164,6 +228,8 @@
         </td>
         <td class="date">{{ s.created_at[:10] if s.created_at else '—' }}</td>
         <td>
+          <button class="report-btn" id="rpt-{{ s.id }}"
+                  onclick="sendReport('{{ s.id }}')">Send report</button>
           <button class="delete-btn" onclick="deleteSub('{{ s.id }}', '{{ s.email }}')">Delete</button>
         </td>
       </tr>
@@ -199,6 +265,57 @@
     if (!confirm('Delete ' + email + '?')) return;
     await fetch('/admin/delete/' + id, { method: 'POST' });
     document.getElementById('row-' + id).remove();
+  }
+
+  async function sendReport(id) {
+    const btn = document.getElementById('rpt-' + id);
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    const res  = await fetch('/admin/send-report/' + id, { method: 'POST' });
+    const data = await res.json();
+    if (data.sent !== undefined) {
+      btn.textContent = 'Sent ✓';
+      setTimeout(() => { btn.disabled = false; btn.textContent = 'Send report'; }, 3000);
+    } else {
+      btn.textContent = data.error || 'Error';
+      setTimeout(() => { btn.disabled = false; btn.textContent = 'Send report'; }, 3000);
+    }
+  }
+
+  async function addClient() {
+    const email = document.getElementById('ac-email').value.trim();
+    const city  = document.getElementById('ac-city').value.trim();
+    const state = document.getElementById('ac-state').value;
+    const plan  = document.getElementById('ac-plan').value;
+    const btn   = document.getElementById('ac-btn');
+    const msg   = document.getElementById('ac-msg');
+
+    msg.style.display = 'none';
+    if (!email || !city || !state) {
+      msg.style.cssText = 'display:block;color:#f87171;';
+      msg.textContent = 'Email, city, and state are required.';
+      return;
+    }
+
+    btn.disabled = true; btn.textContent = 'Adding…';
+    const res  = await fetch('/admin/add-subscriber', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, city, state, plan }),
+    });
+    const data = await res.json();
+
+    if (data.success) {
+      msg.style.cssText = 'display:block;color:#4ade80;';
+      msg.textContent = email + ' added successfully. Reload to see them in the table.';
+      document.getElementById('ac-email').value = '';
+      document.getElementById('ac-city').value  = '';
+      document.getElementById('ac-state').value = '';
+    } else {
+      msg.style.cssText = 'display:block;color:#f87171;';
+      msg.textContent = data.error || 'Something went wrong.';
+    }
+    btn.disabled = false; btn.textContent = 'Add client';
   }
 </script>
 </body>
