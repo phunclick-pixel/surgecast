@@ -1233,15 +1233,13 @@ def run_advance_job():
 
 
 if __name__ == "__main__":
-    schedule.every().day.at("08:00").do(lambda: run_job(afternoon=False))
-    schedule.every().day.at("16:00").do(lambda: run_job(afternoon=True))
-    schedule.every().monday.at("08:30").do(run_advance_job)
+    schedule.every().day.at("06:00").do(lambda: run_job(afternoon=False))
+    schedule.every().monday.at("06:30").do(run_advance_job)
 
     print("Scheduler active:")
-    print("  08:00 daily   - morning scrape + 7-day alerts")
-    print("  16:00 daily   - Pro afternoon alerts")
-    print("  08:30 Mondays - 30-day advance alerts")
-    print("\nRunning initial morning scrape now...\n")
+    print("  06:00 daily   - scrape + 7-day alerts")
+    print("  06:30 Mondays - 30-day advance alerts")
+    print("\nRunning initial scrape now...\n")
     run_job(afternoon=False)
     while True:
         schedule.run_pending()
